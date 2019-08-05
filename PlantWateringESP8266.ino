@@ -2,15 +2,26 @@
 #include <OneWire.h>
 #include "secret.h"
 
-// TODO: 
-// Longer sleep (use eeprom to store variables between runs?)
-// Check power consumption in sleep and awake
+// Using RTC memory for longer sleeps
+
+// TODO:
+// Try a watering quarantine of x hours after watering
+// Try long sleeps and only wake rf on the last wakeup
+// Define for printing stuff to serial
 // Other ways to read soil moisture?
-// Battery voltage dependent PWM motor output?
+// Check power consumption in sleep and awake
 
-// Sleep time in microseconds
-#define SLEEP_TIME 30UL*60UL*1000000UL
 
+// Sleep time and interval in minutes
+#define SLEEP_TIME 360
+#define SLEEP_INTERVAL 30
+// Calculate sleep interval and number of sleeps
+#define SLEEP_INTERVAL_US SLEEP_INTERVAL*60UL*1000000UL
+#define SLEEP_NUM SLEEP_TIME/SLEEP_INTERVAL
+// RTC memory address to use for sleep counter
+#define SLEEP_NUM_ADDR 0 
+
+// Define whether to post to Thingspeak
 #define POST_TO_THINGSPEAK
 
 // Define soil output and measurement pins
@@ -30,15 +41,33 @@
 
 // Wifi
 WiFiClient client;
-//const char* ssid = "YourWifiSSID"; 
-//const char* password = "YourWifiPassword";
+//const char* ssid = "YourWifiSSID"; // Defined in secret.h
+//const char* password = "YourWifiPassword"; // Defined in secret.h
 
 // ThingSpeak variables
-// const char* writeAPIKey = "YourWriteApiKey";
+// const char* writeAPIKey = "YourWriteApiKey"; // Defined in secret.h
 const char* server = "api.thingspeak.com";
 const char* resource = "/update?api_key=";
 
 volatile unsigned long soil_timer;
+
+void longSleep(){
+  uint8_t sleepnum = SLEEP_NUM-1;
+  Serial.print("Number of sleep intervals: "); Serial.println(sleepnum);
+  ESP.rtcUserMemoryWrite(SLEEP_NUM_ADDR, &sleepnum, sizeof(sleepnum));
+  ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
+}
+
+void handleLongSleep(){
+  // Check if we should wake up
+  uint8_t sleepnum;
+  ESP.rtcUserMemoryRead(SLEEP_NUM_ADDR, &sleepnum, sizeof(sleepnum));
+  if (--sleepnum != 0){
+    Serial.print("Going to sleep again. Times left to sleep: "); Serial.println(sleepnum);
+    ESP.rtcUserMemoryWrite(SLEEP_NUM_ADDR, &sleepnum, sizeof(sleepnum));
+    ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
+  }
+}
 
 int readSoil(int n_meas){
   pinMode(SOIL_OUT, OUTPUT);
@@ -79,7 +108,10 @@ void setup() {
   // Make sure Wifi is off
   WiFi.mode(WIFI_OFF);
 
-  delay(2000); //TODO remove
+  delay(2000); //TODO remove. Used to wat a bit after serial.begin before printing serial voltage
+  
+  // Handle long sleep
+  handleLongSleep();
 
   // Read battery voltage
   float voltage = analogRead(A0) * 4.1;
@@ -142,9 +174,9 @@ void setup() {
   client.stop();
   #endif
 
-  Serial.print("Going into deep sleep for "); Serial.print(SLEEP_TIME/1000000/60); Serial.println(" min");
-  // Go into deep sleep
-  ESP.deepSleep(SLEEP_TIME, WAKE_RF_DEFAULT);
+  Serial.print("Going into deep sleep for "); Serial.print(SLEEP_TIME); Serial.println(" min");
+  // Go into long deep sleep
+  longSleep();
 
 }
 
