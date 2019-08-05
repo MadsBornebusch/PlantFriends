@@ -1,0 +1,2 @@
+# Ignore header file with secret stuff
+secret.h
