@@ -2,27 +2,27 @@
 #include <OneWire.h>
 #include "secret.h"
 
-// Using RTC memory for longer sleeps
-
 // TODO:
-// Try using the median soil moisture measurement
-// Try a watering quarantine of x hours after watering (wake/sleep mode with a data type. Byte 2 of sleep data: 0xFF00)
 // Try long sleeps and only wake rf on the last wakeup
 // Define for printing stuff to serial
 // Other ways to read soil moisture?
 // Check power consumption in sleep and awake
+// Header file with definitions
 
 
 // Sleep time in minutes
-#define SLEEP_TIME 60
-// Sleep interval can safely be set from 1 to 30 minutes (possibly higher, but there is a limitation to sleep time with the esp8266)
-#define SLEEP_INTERVAL 30
+#define SLEEP_TIME 10
+// Sleep interval can safely be set from 1 to 30 minutes (possibly higher, but there is a limitation to sleep time with the esp8266). Should be smaller or equal to SLEEP_TIME
+#define SLEEP_INTERVAL 10
 // Calculate sleep interval and number of sleeps
 #define SLEEP_INTERVAL_US SLEEP_INTERVAL*60UL*1000000UL
 #define SLEEP_NUM SLEEP_TIME/SLEEP_INTERVAL
 // RTC memory address to use for sleep counter
 #define SLEEP_DATA_ADDR 0 
 #define SLEEP_ID 0x2353
+// Minimum time between watering plant (minutes) and watering delay
+#define MIN_WATERING_TIME 60
+#define WATERING_DELAY MIN_WATERING_TIME/SLEEP_TIME
 
 // Define whether to post to Thingspeak
 #define POST_TO_THINGSPEAK
@@ -99,7 +99,6 @@ long getMeanWithoutMinMax(long *array, uint8_t n){
   return sum/n_meas;
 }
 
-
 void longSleep(){
   uint8_t sleepnum = SLEEP_NUM;
   Serial.print("Number of sleep intervals: "); Serial.println(sleepnum);
@@ -125,6 +124,21 @@ void handleLongSleep(){
     ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR, &sleep_data, sizeof(sleep_data));
     ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
   }
+}
+
+uint8_t readWateringDelay(){
+  uint32_t watering_data;
+  ESP.rtcUserMemoryRead(SLEEP_DATA_ADDR + 1, &watering_data, sizeof(watering_data));
+  if((watering_data >> 16) == SLEEP_ID)
+    return (0x00FF & watering_data);
+  else
+    return 1;
+}
+
+void writeWateringDelay(uint8_t wateringDelay){
+  uint32_t watering_data;
+  watering_data = (SLEEP_ID << 16) + (0x00FF & wateringDelay);
+  ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR + 1, &watering_data, sizeof(watering_data));
 }
 
 void readSoil(long *soil_measurements, int n_meas){
@@ -173,25 +187,31 @@ void setup() {
   float voltage = analogRead(A0) * 4.1;
   Serial.print("Successfully read battery voltage: "); Serial.println(voltage);
   
+  blinkLED();
 
   // Read soil moisture
   long soil_measurements[N_SOIL_MEAS];
   readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+  Serial.println("Read soil moisture");
   int soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+  Serial.println("Calculated mean soil moisture");
   int soil_moisture_filtered = getMeanWithoutMinMax(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
-  Serial.println("Successfully read soil moisture: "); Serial.println(soil_moisture);
+  Serial.println("Successfully found soil moisture: "); Serial.println(soil_moisture);
   Serial.println("Filtered soil moisture: "); Serial.println(soil_moisture_filtered);
 
-  blinkLED();
-
   // Water plant
-  if(soil_moisture <= WATERING_THRESHOLD){
+  uint8_t watering_delay = readWateringDelay();
+  Serial.print("Watering delay: "); Serial.println(watering_delay);
+  if(soil_moisture <= WATERING_THRESHOLD && watering_delay <= 1){
     Serial.println("Watering plant!!");
     pinMode(WATERING_OUT, OUTPUT);
     analogWrite(WATERING_OUT,1023/4*3);
     delay(WATERING_TIME*1000);
     digitalWrite(WATERING_OUT, LOW);
     pinMode(WATERING_OUT, INPUT);
+    writeWateringDelay(WATERING_DELAY);
+  }else if(watering_delay > 1){
+    writeWateringDelay(watering_delay - 1);
   }
 
 
