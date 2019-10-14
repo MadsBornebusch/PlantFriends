@@ -2,13 +2,6 @@
 #include <OneWire.h>
 #include "secret.h"
 
-// TODO:
-// Try long sleeps and only wake rf on the last wakeup
-// Define for printing stuff to serial
-// Other ways to read soil moisture?
-// Check power consumption in sleep and awake
-// Header file with definitions
-
 
 // Sleep time in minutes
 #define SLEEP_TIME 10
@@ -18,7 +11,7 @@
 #define SLEEP_INTERVAL_US SLEEP_INTERVAL*60UL*1000000UL
 #define SLEEP_NUM SLEEP_TIME/SLEEP_INTERVAL
 // RTC memory address to use for sleep counter
-#define SLEEP_DATA_ADDR 0 
+#define SLEEP_DATA_ADDR 256
 #define SLEEP_ID 0x2353
 // Minimum time between watering plant (minutes) and watering delay
 #define MIN_WATERING_TIME 60
@@ -34,7 +27,7 @@
 #define N_SOIL_MEAS 4
 
 // Define watering threshold and time
-#define WATERING_THRESHOLD 2500
+#define WATERING_THRESHOLD 3200
 #define WATERING_TIME 3
 // Define watering pin
 #define WATERING_OUT 13
