@@ -166,11 +166,10 @@ void blinkLED(){
 void setup() {
   Serial.begin(115200);
   Serial.println("Booting");
+  Serial.flush();
 
   // Make sure Wifi is off
   WiFi.mode(WIFI_OFF);
-
-  delay(2000); //TODO remove. Used to wait a bit after serial is initialised before printing voltage
   
   // Handle long sleep
   handleLongSleep();
