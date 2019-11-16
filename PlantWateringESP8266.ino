@@ -258,6 +258,6 @@ void loop() {
   ESP.restart();
 }
 
-void interrupt_routine(){
+void ICACHE_RAM_ATTR interrupt_routine(){
   soil_timer = ESP.getCycleCount();
 }
