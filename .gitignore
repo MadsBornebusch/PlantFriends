@@ -6,3 +6,6 @@ secret.h
 
 # Ignore vscode folder
 .vscode
+
+# Ignore Python virtual environment
+venv
