@@ -1,2 +1,8 @@
 # Ignore header file with secret stuff
 secret.h
+
+# Ignore platforn io folder
+.pio
+
+# Ignore vscode folder
+.vscode

@@ -24,5 +24,6 @@ This is a plant watering ESP8266.
 - [ ] Other ways to read soil moisture?
 - [ ] Check power consumption in sleep and awake
 - [ ] Header file with definitions?
+- [ ] Better structure: move functions out of main files
 - [ ] Read I2C sensors (such as BME environment sensors)
 

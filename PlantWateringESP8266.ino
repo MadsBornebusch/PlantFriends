@@ -1,5 +1,4 @@
 #include <ESP8266WiFi.h>
-#include <OneWire.h>
 #include "secret.h"
 
 
