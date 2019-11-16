@@ -2,6 +2,25 @@
 
 This is a plant watering ESP8266. 
 
+# PCB
+## Pinout when seem from component side:
+Left side from top:
+- FTDI_RX
+- FTDI_TX
+
+- SDA
+- SCL
+- GND
+- Battery VCC
+
+## Right side from top:
+- Battery VCC IN
+- GND
+
+- VCC (3.3 V)
+- Watering OUT
+
+# TODO lists
 
 ## TODO 
 - [ ] Add Kicad PCB project
