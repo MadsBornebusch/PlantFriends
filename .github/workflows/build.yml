@@ -18,7 +18,7 @@ jobs:
         pio update
     - name: Compile project
       run: |
-        echo -e '#define ssid ""\n#define password ""\n#define writeAPIKey ""\n' > secret.h
+        echo -e '#define ssid ""\n#define password ""\n#define writeAPIKey ""\n#define MQTT_USERNAME ""\n#define MQTT_PASSWORD ""\n' > secret.h
         pio run
     - name: Prepare binary
       run: |
