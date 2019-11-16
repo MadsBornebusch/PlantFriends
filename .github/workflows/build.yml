@@ -19,6 +19,7 @@ jobs:
     - name: Compile project
       run: |
         echo -e '#define ssid ""\n#define password ""\n#define writeAPIKey ""\n' > secret.h
+        echo -e '#define MQTT_HOST ""\n#define MQTT_PORT 1883\n#define MQTT_USERNAME ""\n#define MQTT_PASSWORD ""\n#define MQTT_TOPIC ""' >> secret.h
         pio run
     - name: Prepare binary
       run: |

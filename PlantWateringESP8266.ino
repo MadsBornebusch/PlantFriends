@@ -1,6 +1,6 @@
 #include <ESP8266WiFi.h>
+#include <AsyncMqttClient.h>
 #include "secret.h"
-
 
 // Sleep time in minutes
 #define SLEEP_TIME 10
@@ -36,11 +36,19 @@
 
 // Wifi
 WiFiClient client;
-//const char* ssid = "YourWifiSSID"; // Defined in secret.h
-//const char* password = "YourWifiPassword"; // Defined in secret.h
+//#define ssid "YourWifiSSID" // Defined in secret.h
+//#define password "YourWifiPassword" // Defined in secret.h
+
+// MQTT
+//#define MQTT_HOST "192.168.1.10" // Defined in secret.h
+//#define MQTT_PORT 1883 // Defined in secret.h
+//#define MQTT_USERNAME "" // Defined in secret.h
+//#define MQTT_PASSWORD "" // Defined in secret.h
+
+AsyncMqttClient mqttClient;
 
 // ThingSpeak variables
-// const char* writeAPIKey = "YourWriteApiKey"; // Defined in secret.h
+//#define writeAPIKey "YourWriteApiKey" // Defined in secret.h
 const char* server = "api.thingspeak.com";
 const char* resource = "/update?api_key=";
 
@@ -162,15 +170,37 @@ void blinkLED(){
   pinMode(LED_PIN, INPUT);
 }
 
+void onMqttConnect(bool sessionPresent) {
+  Serial.println(F("Connected to MQTT"));
+  //Serial.printf("Session present: %d\n", sessionPresent);
+}
+
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+  Serial.println(F("Disconnected from MQTT"));
+}
+
+volatile uint16 publishedPacketId = -1;
+
+void onMqttPublish(uint16_t packetId) {
+  publishedPacketId = packetId;
+  //Serial.printf("Publish acknowledged - packet ID: %u\n", packetId);
+}
+
+bool mqttPublishBlocking(String topic, String payload, int timeout) {
+  publishedPacketId = -1;
+  uint16_t packetId = mqttClient.publish(topic.c_str(), 2, false, payload.c_str());
+  while (publishedPacketId != packetId && (timeout-- > 0))
+    delay(100);
+  return timeout > 0;
+}
 
 void setup() {
   Serial.begin(115200);
   Serial.println("Booting");
+  Serial.flush();
 
   // Make sure Wifi is off
   WiFi.mode(WIFI_OFF);
-
-  delay(2000); //TODO remove. Used to wait a bit after serial is initialised before printing voltage
   
   // Handle long sleep
   handleLongSleep();
@@ -206,7 +236,6 @@ void setup() {
     writeWateringDelay(watering_delay - 1);
   }
 
-
   // Connect to Wifi
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
@@ -219,8 +248,38 @@ void setup() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
+  // Connect to the MQTT broker
+  mqttClient.onConnect(onMqttConnect);
+  mqttClient.onDisconnect(onMqttDisconnect);
+  //mqttClient.onSubscribe(onMqttSubscribe);
+  //mqttClient.onUnsubscribe(onMqttUnsubscribe);
+  //mqttClient.onMessage(onMqttMessage);
+  mqttClient.onPublish(onMqttPublish);
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+  mqttClient.setCredentials(MQTT_USERNAME, MQTT_PASSWORD);
+  mqttClient.connect();
 
-  #ifdef POST_TO_THINGSPEAK 
+  int timeout = 5 * 10; // 5 seconds
+  while (!mqttClient.connected() && (timeout-- > 0));
+    delay(100);
+
+  // Post the data to MQTT
+  if (mqttClient.connected()) {
+    if (mqttPublishBlocking(MQTT_TOPIC + String("/soil_moisture"), String(soil_moisture), 5 * 10))
+      Serial.print(F("Successfully sent"));
+    else
+      Serial.print(F("Failed to send"));
+    Serial.println(F(" MQTT soil moisture"));
+
+    if (mqttPublishBlocking(MQTT_TOPIC + String("/voltage"), String(voltage / 1000.0f, 3), 5 * 10))
+      Serial.print(F("Successfully sent"));
+    else
+      Serial.print(F("Failed to send"));
+    Serial.println(F(" MQTT voltage"));
+  } else
+    Serial.println(F("Failed to connect to MQTT broker"));
+
+#ifdef POST_TO_THINGSPEAK
   // Post to Thingspeak
   if (client.connect(server,80)) {
     
@@ -244,14 +303,12 @@ void setup() {
     //ESP.restart();
   }
   client.stop();
-  #endif
+#endif
 
   Serial.print("Going into deep sleep for "); Serial.print(SLEEP_TIME); Serial.println(" min");
   // Go into long deep sleep
   longSleep();
-
 }
-
 
 void loop() {
   Serial.println("Somewhere we took a wrong turn and ended up in the main loop...");
