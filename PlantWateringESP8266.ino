@@ -1,5 +1,7 @@
-#include <ESP8266WiFi.h>
 #include <AsyncMqttClient.h>
+#include <EEPROM.h>
+#include <ESP8266WiFi.h>
+
 #include "secret.h"
 
 // Sleep time in minutes
@@ -34,21 +36,36 @@
 // Define LED pin for built in LED (ESP-12 board)
 #define LED_PIN 2
 
+// The EEPROM is used to store the configuration values between updates
+static const uint64_t EEPROM_MAGIC_NUMBER = 0x3b04cd9e94521f9a;
+
+typedef struct {
+    uint64_t magic_number; // Used to determine if the EEPROM have been configured or not
+    char wifi_ssid[33]; // SSID should be a maximum of 32 characters according to the specs
+    char wifi_password[33]; // Restrict password length to 32 characters
+    char thingspeak_api_key[17]; // The API is 16 characters
+    uint32_t mqtt_host; // We only support IPv4 for now
+    uint16_t mqtt_port;
+    char mqtt_username[33]; // Just set these to 32 as well
+    char mqtt_password[33];
+    char mqtt_base_topic[33];
+} eeprom_config_t;
+
 // Wifi
 WiFiClient client;
-//#define ssid "YourWifiSSID" // Defined in secret.h
-//#define password "YourWifiPassword" // Defined in secret.h
+//#define WIFI_SSID "YourWifiSSID" // Defined in secret.h
+//#define WIFI_PASSWORD "YourWifiPassword" // Defined in secret.h
 
 // MQTT
-//#define MQTT_HOST "192.168.1.10" // Defined in secret.h
+AsyncMqttClient mqttClient;
+//#define MQTT_HOST IPAddress(192, 168, 1, 10) // Defined in secret.h
 //#define MQTT_PORT 1883 // Defined in secret.h
 //#define MQTT_USERNAME "" // Defined in secret.h
 //#define MQTT_PASSWORD "" // Defined in secret.h
-
-AsyncMqttClient mqttClient;
+//#define MQTT_BASE_TOPIC "" // Defined in secret.h
 
 // ThingSpeak variables
-//#define writeAPIKey "YourWriteApiKey" // Defined in secret.h
+//#define THINGSPEAK_API_KEY "YourWriteApiKey" // Defined in secret.h
 const char* server = "api.thingspeak.com";
 const char* resource = "/update?api_key=";
 
@@ -196,7 +213,7 @@ bool mqttPublishBlocking(String topic, String payload, int timeout) {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Booting");
+  Serial.println("\nBooting");
   Serial.flush();
 
   // Make sure Wifi is off
@@ -204,6 +221,53 @@ void setup() {
   
   // Handle long sleep
   handleLongSleep();
+
+  // Use x bytes of ESP8266 flash for "EEPROM" emulation
+  // This loads x bytes from the flasg into a array stored in RAM
+  EEPROM.begin(sizeof(eeprom_config_t));
+
+  // Read the configuration from EEPROM and check if it is valid
+  eeprom_config_t eeprom_config;
+  EEPROM.get(0, eeprom_config);
+  if (eeprom_config.magic_number != EEPROM_MAGIC_NUMBER) {
+    Serial.println(F("Restoring default configuration values"));
+    eeprom_config.magic_number = EEPROM_MAGIC_NUMBER;
+
+    strncpy(eeprom_config.wifi_ssid, WIFI_SSID, sizeof(eeprom_config.wifi_ssid) - 1);
+    eeprom_config.wifi_ssid[sizeof(eeprom_config.wifi_ssid) - 1] = '\0';
+
+    strncpy(eeprom_config.wifi_password, WIFI_PASSWORD, sizeof(eeprom_config.wifi_password) - 1);
+    eeprom_config.wifi_password[sizeof(eeprom_config.wifi_password) - 1] = '\0';
+
+    strncpy(eeprom_config.thingspeak_api_key, THINGSPEAK_API_KEY, sizeof(eeprom_config.thingspeak_api_key) - 1);
+    eeprom_config.thingspeak_api_key[sizeof(eeprom_config.thingspeak_api_key) - 1] = '\0';
+
+    eeprom_config.mqtt_host = MQTT_HOST;
+    eeprom_config.mqtt_port = MQTT_PORT;
+
+    strncpy(eeprom_config.mqtt_username, MQTT_USERNAME, sizeof(eeprom_config.mqtt_username) - 1);
+    eeprom_config.mqtt_username[sizeof(eeprom_config.mqtt_username) - 1] = '\0';
+
+    strncpy(eeprom_config.mqtt_password, MQTT_PASSWORD, sizeof(eeprom_config.mqtt_password) - 1);
+    eeprom_config.mqtt_password[sizeof(eeprom_config.mqtt_password) - 1] = '\0';
+
+    strncpy(eeprom_config.mqtt_base_topic, MQTT_BASE_TOPIC, sizeof(eeprom_config.mqtt_base_topic) - 1);
+    eeprom_config.mqtt_base_topic[sizeof(eeprom_config.mqtt_base_topic) - 1] = '\0';
+
+    // Replace values in RAM with the modified values
+    // This does NOT make any changes to flash, all data is still in RAM
+    EEPROM.put(0, eeprom_config);
+  } else
+    Serial.println(F("Read configuration values from EEPROM"));
+
+  // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
+  EEPROM.end();
+
+  // The password and ThingSpeak API key are not printed for security reasons
+  Serial.printf("WiFi SSID: %s\n", eeprom_config.wifi_ssid);
+  Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
+    IPAddress(eeprom_config.mqtt_host).toString().c_str(), eeprom_config.mqtt_port,
+    eeprom_config.mqtt_username, eeprom_config.mqtt_base_topic);
 
   // Read battery voltage
   float voltage = analogRead(A0) * 4.1;
@@ -218,8 +282,8 @@ void setup() {
   int soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
   Serial.println("Calculated mean soil moisture");
   int soil_moisture_filtered = getMeanWithoutMinMax(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
-  Serial.println("Successfully found soil moisture: "); Serial.println(soil_moisture);
-  Serial.println("Filtered soil moisture: "); Serial.println(soil_moisture_filtered);
+  Serial.print("Successfully found soil moisture: "); Serial.println(soil_moisture);
+  Serial.print("Filtered soil moisture: "); Serial.println(soil_moisture_filtered);
 
   // Water plant
   uint8_t watering_delay = readWateringDelay();
@@ -238,7 +302,7 @@ void setup() {
 
   // Connect to Wifi
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  WiFi.begin(eeprom_config.wifi_ssid, eeprom_config.wifi_password);
   while (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println("Connection Failed! Rebooting...");
     delay(5000);
@@ -255,8 +319,8 @@ void setup() {
   //mqttClient.onUnsubscribe(onMqttUnsubscribe);
   //mqttClient.onMessage(onMqttMessage);
   mqttClient.onPublish(onMqttPublish);
-  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
-  mqttClient.setCredentials(MQTT_USERNAME, MQTT_PASSWORD);
+  mqttClient.setServer(eeprom_config.mqtt_host, eeprom_config.mqtt_port);
+  mqttClient.setCredentials(eeprom_config.mqtt_username, eeprom_config.mqtt_password);
   mqttClient.connect();
 
   int timeout = 5 * 10; // 5 seconds
@@ -265,13 +329,13 @@ void setup() {
 
   // Post the data to MQTT
   if (mqttClient.connected()) {
-    if (mqttPublishBlocking(MQTT_TOPIC + String("/soil_moisture"), String(soil_moisture), 5 * 10))
+    if (mqttPublishBlocking(eeprom_config.mqtt_base_topic + String("/soil_moisture"), String(soil_moisture), 5 * 10))
       Serial.print(F("Successfully sent"));
     else
       Serial.print(F("Failed to send"));
     Serial.println(F(" MQTT soil moisture"));
 
-    if (mqttPublishBlocking(MQTT_TOPIC + String("/voltage"), String(voltage / 1000.0f, 3), 5 * 10))
+    if (mqttPublishBlocking(eeprom_config.mqtt_base_topic + String("/voltage"), String(voltage / 1000.0f, 3), 5 * 10))
       Serial.print(F("Successfully sent"));
     else
       Serial.print(F("Failed to send"));
@@ -282,8 +346,7 @@ void setup() {
 #ifdef POST_TO_THINGSPEAK
   // Post to Thingspeak
   if (client.connect(server,80)) {
-    
-    client.print(String("GET ") + resource + writeAPIKey + 
+    client.print(String("GET ") + resource + eeprom_config.thingspeak_api_key +
         "&field1=" + soil_moisture_filtered + "&field2=" + 0.0 +
         "&field3=" + soil_moisture + "&field4=" + voltage + "&field5=" + 0.0 + 
                 " HTTP/1.1\r\n" + "Host: " + server + "\r\n" + "Connection: close\r\n\r\n");
