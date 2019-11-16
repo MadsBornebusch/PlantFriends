@@ -23,8 +23,8 @@ Left side from top:
 # TODO lists
 
 ## TODO 
-- [ ] Add Kicad PCB project
-- [ ] Add some form of license
+- [x] Add Kicad PCB project
+- [x] Add some form of license
 
 
 ## TODO code
