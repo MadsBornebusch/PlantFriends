@@ -1,6 +1,8 @@
 # Plant watering ESP8266
 
 This is a plant watering ESP8266. 
+The code is licensed under the GNU GENERAL PUBLIC LICENSE Version 3 in the LICENSE file.
+The PCB is licensed under the Creative Commons Attribution-ShareAlike 4.0 license due to using an [ESP8266 kicad library](https://github.com/jdunmire/kicad-ESP8266) and a particular [soil moisture probe design](https://github.com/acolomitchi/cap-soil-moisture-v2).
 
 # PCB
 ## Pinout when seem from component side:
@@ -33,8 +35,8 @@ Left side from top:
 - [ ] Make a struct for variables to save in RTC memory
 - [ ] Only check for OTA update once per day (24 hr)
 - [ ] [Use SPIFFS file system to store configuration file (soil moisture etc)](https://arduino-esp8266.readthedocs.io/en/latest/filesystem.html)
-- [ ] Use MQTT for data
-- [ ] Show MQTT data in Home Assistant
+- [x] Use MQTT for data
+- [x] Show MQTT data in Home Assistant
 
 ## TODO code (low priority)
 
