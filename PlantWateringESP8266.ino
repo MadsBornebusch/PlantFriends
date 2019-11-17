@@ -226,7 +226,7 @@ bool mqttPublishBlocking(String topic, String payload, int timeout) {
 }
 
 void printEEPROMConfig(const eeprom_config_t &eeprom_config) {
-    // The password and ThingSpeak API key are not printed for security reasons
+    // The passwords and ThingSpeak API key are not printed for security reasons
   Serial.printf("WiFi SSID: %s\n", eeprom_config.wifi_ssid);
   Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
     IPAddress(eeprom_config.mqtt_host).toString().c_str(), eeprom_config.mqtt_port,
@@ -250,8 +250,7 @@ void setup() {
 
   // If the pin is now low, then it means that RX and TX are shorted together
   // Simply reset the magic number, so it goes into AP mode
-  bool turn_on_ap = !digitalRead(TX_PIN);
-  if (turn_on_ap)
+  if (!digitalRead(TX_PIN))
     eeprom_config.magic_number = 0;
 
   // It is okay to turn on the serial interface even if the pins are shorted,
@@ -312,17 +311,14 @@ void setup() {
         return;
       }
 
-      String wifi_ssid = request->arg("wifi_ssid");
-      strncpy(eeprom_config.wifi_ssid, wifi_ssid.c_str(), sizeof(eeprom_config.wifi_ssid) - 1);
-      eeprom_config.wifi_ssid[sizeof(eeprom_config.wifi_ssid) - 1] = '\0';
+      strncpy(eeprom_config.wifi_ssid, request->arg("wifi_ssid").c_str(), sizeof(eeprom_config.wifi_ssid) - 1);
+      eeprom_config.wifi_ssid[sizeof(eeprom_config.wifi_ssid) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      String wifi_password = request->arg("wifi_password");
-      strncpy(eeprom_config.wifi_password, wifi_password.c_str(), sizeof(eeprom_config.wifi_password) - 1);
-      eeprom_config.wifi_password[sizeof(eeprom_config.wifi_password) - 1] = '\0';
+      strncpy(eeprom_config.wifi_password, request->arg("wifi_password").c_str(), sizeof(eeprom_config.wifi_password) - 1);
+      eeprom_config.wifi_password[sizeof(eeprom_config.wifi_password) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      String thingspeak_api_key = request->arg("thingspeak_api_key");
-      strncpy(eeprom_config.thingspeak_api_key, thingspeak_api_key.c_str(), sizeof(eeprom_config.thingspeak_api_key) - 1);
-      eeprom_config.thingspeak_api_key[sizeof(eeprom_config.thingspeak_api_key) - 1] = '\0';
+      strncpy(eeprom_config.thingspeak_api_key, request->arg("thingspeak_api_key").c_str(), sizeof(eeprom_config.thingspeak_api_key) - 1);
+      eeprom_config.thingspeak_api_key[sizeof(eeprom_config.thingspeak_api_key) - 1] = '\0'; // Make sure the buffer is null-terminated
 
       IPAddress mqtt_host;
       if (!mqtt_host.fromString(request->arg("mqtt_host"))) {
@@ -334,17 +330,14 @@ void setup() {
 
       eeprom_config.mqtt_port = request->arg("mqtt_port").toInt();
 
-      String mqtt_username = request->arg("mqtt_username");
-      strncpy(eeprom_config.mqtt_username, mqtt_username.c_str(), sizeof(eeprom_config.mqtt_username) - 1);
-      eeprom_config.mqtt_username[sizeof(eeprom_config.mqtt_username) - 1] = '\0';
+      strncpy(eeprom_config.mqtt_username, request->arg("mqtt_username").c_str(), sizeof(eeprom_config.mqtt_username) - 1);
+      eeprom_config.mqtt_username[sizeof(eeprom_config.mqtt_username) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      String mqtt_password = request->arg("mqtt_password");
-      strncpy(eeprom_config.mqtt_password, mqtt_password.c_str(), sizeof(eeprom_config.mqtt_password) - 1);
-      eeprom_config.mqtt_password[sizeof(eeprom_config.mqtt_password) - 1] = '\0';
+      strncpy(eeprom_config.mqtt_password, request->arg("mqtt_password").c_str(), sizeof(eeprom_config.mqtt_password) - 1);
+      eeprom_config.mqtt_password[sizeof(eeprom_config.mqtt_password) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      String mqtt_base_topic = request->arg("mqtt_base_topic");
-      strncpy(eeprom_config.mqtt_base_topic, mqtt_base_topic.c_str(), sizeof(eeprom_config.mqtt_base_topic) - 1);
-      eeprom_config.mqtt_base_topic[sizeof(eeprom_config.mqtt_base_topic) - 1] = '\0';
+      strncpy(eeprom_config.mqtt_base_topic, request->arg("mqtt_base_topic").c_str(), sizeof(eeprom_config.mqtt_base_topic) - 1);
+      eeprom_config.mqtt_base_topic[sizeof(eeprom_config.mqtt_base_topic) - 1] = '\0'; // Make sure the buffer is null-terminated
 
       // The values where succesfully configured
       eeprom_config.magic_number = EEPROM_MAGIC_NUMBER;
