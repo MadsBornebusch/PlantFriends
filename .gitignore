@@ -9,3 +9,6 @@ secret.h
 
 # Ignore Python virtual environment
 venv
+
+# Ignore temporary build file created by PlatformIO
+*.ino.cpp

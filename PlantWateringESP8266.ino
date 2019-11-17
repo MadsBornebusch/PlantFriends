@@ -1,8 +1,14 @@
 #include <AsyncMqttClient.h>
+#include <DNSServer.h>
+#include <ESPAsyncWebServer.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
 
 #include "secret.h"
+
+// Define the access point SSID and password
+#define WIFI_AP_SSID "PlantWateringESP8266"
+#define WIFI_AP_PASSWORD "plantsarecool"
 
 // Sleep time in minutes
 #define SLEEP_TIME 10
@@ -66,8 +72,12 @@ AsyncMqttClient mqttClient;
 
 // ThingSpeak variables
 //#define THINGSPEAK_API_KEY "YourWriteApiKey" // Defined in secret.h
-const char* server = "api.thingspeak.com";
-const char* resource = "/update?api_key=";
+const char* thingspeak_server = "api.thingspeak.com";
+const char* thingspeak_resource = "/update?api_key=";
+
+// AP
+static AsyncWebServer httpServer(80);
+static DNSServer dnsServer;
 
 volatile unsigned long soil_timer;
 
@@ -93,11 +103,11 @@ long getMean(long *array, uint8_t n){
   long sum = 0;
   for(uint8_t i = 0; i<n; i++)
     sum += array[i];
-  return sum/n; 
+  return sum/n;
 }
 
 long getMeanWithoutMinMax(long *array, uint8_t n){
-  long sum = 0; 
+  long sum = 0;
   long min = 1000000;
   long max = 0;
   for(uint8_t i = 0; i<n; i++){
@@ -211,6 +221,14 @@ bool mqttPublishBlocking(String topic, String payload, int timeout) {
   return timeout > 0;
 }
 
+void printEEPROMConfig(const eeprom_config_t &eeprom_config) {
+    // The password and ThingSpeak API key are not printed for security reasons
+  Serial.printf("WiFi SSID: %s\n", eeprom_config.wifi_ssid);
+  Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
+    IPAddress(eeprom_config.mqtt_host).toString().c_str(), eeprom_config.mqtt_port,
+    eeprom_config.mqtt_username, eeprom_config.mqtt_base_topic);
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("\nBooting");
@@ -218,61 +236,156 @@ void setup() {
 
   // Make sure Wifi is off
   WiFi.mode(WIFI_OFF);
-  
+
   // Handle long sleep
   handleLongSleep();
 
   // Use x bytes of ESP8266 flash for "EEPROM" emulation
-  // This loads x bytes from the flasg into a array stored in RAM
+  // This loads x bytes from the flash into a array stored in RAM
   EEPROM.begin(sizeof(eeprom_config_t));
 
   // Read the configuration from EEPROM and check if it is valid
   eeprom_config_t eeprom_config;
   EEPROM.get(0, eeprom_config);
   if (eeprom_config.magic_number != EEPROM_MAGIC_NUMBER) {
-    Serial.println(F("Restoring default configuration values"));
-    eeprom_config.magic_number = EEPROM_MAGIC_NUMBER;
+    // Configure the hotspot
+    // Note that we set the maximum number of connection to 1
+    int channel = 1, ssid_hidden = 0, max_connection = 1;
+    if (!WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD, channel, ssid_hidden, max_connection)) {
+      Serial.println(F("Failed to start hotspot! Rebooting..."));
+      delay(5000);
+      ESP.restart();
+    }
+    IPAddress ip = WiFi.softAPIP();
+    Serial.print(F("AP IP address: ")); Serial.println(ip);
 
-    strncpy(eeprom_config.wifi_ssid, WIFI_SSID, sizeof(eeprom_config.wifi_ssid) - 1);
-    eeprom_config.wifi_ssid[sizeof(eeprom_config.wifi_ssid) - 1] = '\0';
+    if (dnsServer.start(53, "*", ip)) // Redirect all requests to the our IP address
+      Serial.println(F("DNS server started"));
+    else
+      Serial.println(F("Failed to start DNS server"));
 
-    strncpy(eeprom_config.wifi_password, WIFI_PASSWORD, sizeof(eeprom_config.wifi_password) - 1);
-    eeprom_config.wifi_password[sizeof(eeprom_config.wifi_password) - 1] = '\0';
+    // Show a form on the root page
+    httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+      AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
+      response->addHeader(F("Cache-Control"), F("no-cache,no-store,must-revalidate"));
+      response->addHeader(F("Pragma"), F("no-cache"));
+      response->addHeader(F("Expires"), F("-1"));
 
-    strncpy(eeprom_config.thingspeak_api_key, THINGSPEAK_API_KEY, sizeof(eeprom_config.thingspeak_api_key) - 1);
-    eeprom_config.thingspeak_api_key[sizeof(eeprom_config.thingspeak_api_key) - 1] = '\0';
+      // Format the HTML response
+      response->print(F("<html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover\"></head>"));
+      response->print(F("<body style=\"margin:50px auto;text-align:center;\">"));
+      response->print(F("<form action=\"/config\" method=\"POST\">"));
+      response->print(F("<input style=\"width:50%;\" type=\"text\" name=\"wifi_ssid\" placeholder=\"WiFi SSID\" value=\"")); response->print(WIFI_SSID); response->print(F("\"></br>"));
+      response->print(F("<input style=\"width:50%;\" type=\"password\" name=\"wifi_password\" placeholder=\"WiFi password\" value=\"")); response->print(WIFI_PASSWORD); response->print(F("\"></br>"));
+      response->print(F("<input style=\"width:50%;\" type=\"password\" name=\"thingspeak_api_key\" placeholder=\"ThingSpeak API key\" value=\"")); response->print(THINGSPEAK_API_KEY); response->print(F("\"></br>"));
+      response->print(F("<input style=\"width:50%;\" type=\"text\" name=\"mqtt_host\" placeholder=\"MQTT host\" value=\"")); response->print(MQTT_HOST); response->print(F("\"></br>"));
+      response->print(F("<input style=\"width:50%;\" type=\"number\" name=\"mqtt_port\" placeholder=\"MQTT port\" value=\"")); response->print(MQTT_PORT); response->print(F("\"></br>"));
+      response->print(F("<input style=\"width:50%;\" type=\"text\" name=\"mqtt_username\" placeholder=\"MQTT username\" value=\"")); response->print(MQTT_USERNAME); response->print(F("\"></br>"));
+      response->print(F("<input style=\"width:50%;\" type=\"password\" name=\"mqtt_password\" placeholder=\"MQTT password\" value=\"")); response->print(MQTT_PASSWORD); response->print(F("\"></br>"));
+      response->print(F("<input style=\"width:50%;\" type=\"text\" name=\"mqtt_base_topic\" placeholder=\"MQTT base topic\" value=\"")); response->print(MQTT_BASE_TOPIC); response->print(F("\"></br>"));
+      response->print(F("<input style=\"width:50%;\" type=\"submit\" value=\"Submit\">"));
+      response->print(F("</form></body></html>"));
 
-    eeprom_config.mqtt_host = MQTT_HOST;
-    eeprom_config.mqtt_port = MQTT_PORT;
+      request->send(response); // Send the response
+    });
 
-    strncpy(eeprom_config.mqtt_username, MQTT_USERNAME, sizeof(eeprom_config.mqtt_username) - 1);
-    eeprom_config.mqtt_username[sizeof(eeprom_config.mqtt_username) - 1] = '\0';
+    // Handle the post request
+    httpServer.on("/config", HTTP_POST, [&eeprom_config](AsyncWebServerRequest *request) {
+      if (!request->hasArg("wifi_ssid") || !request->hasArg("wifi_password")
+        || !request->hasArg("thingspeak_api_key")
+        || !request->hasArg("mqtt_host") || !request->hasArg("mqtt_port")
+        || !request->hasArg("mqtt_username") || !request->hasArg("mqtt_password") || !request->hasArg("mqtt_base_topic")) {
+        request->send(400, F("text/plain"), F("400: Invalid request"));
+        return;
+      }
 
-    strncpy(eeprom_config.mqtt_password, MQTT_PASSWORD, sizeof(eeprom_config.mqtt_password) - 1);
-    eeprom_config.mqtt_password[sizeof(eeprom_config.mqtt_password) - 1] = '\0';
+      String wifi_ssid = request->arg("wifi_ssid");
+      strncpy(eeprom_config.wifi_ssid, wifi_ssid.c_str(), sizeof(eeprom_config.wifi_ssid) - 1);
+      eeprom_config.wifi_ssid[sizeof(eeprom_config.wifi_ssid) - 1] = '\0';
 
-    strncpy(eeprom_config.mqtt_base_topic, MQTT_BASE_TOPIC, sizeof(eeprom_config.mqtt_base_topic) - 1);
-    eeprom_config.mqtt_base_topic[sizeof(eeprom_config.mqtt_base_topic) - 1] = '\0';
+      String wifi_password = request->arg("wifi_password");
+      strncpy(eeprom_config.wifi_password, wifi_password.c_str(), sizeof(eeprom_config.wifi_password) - 1);
+      eeprom_config.wifi_password[sizeof(eeprom_config.wifi_password) - 1] = '\0';
+
+      String thingspeak_api_key = request->arg("thingspeak_api_key");
+      strncpy(eeprom_config.thingspeak_api_key, thingspeak_api_key.c_str(), sizeof(eeprom_config.thingspeak_api_key) - 1);
+      eeprom_config.thingspeak_api_key[sizeof(eeprom_config.thingspeak_api_key) - 1] = '\0';
+
+      IPAddress mqtt_host;
+      if (!mqtt_host.fromString(request->arg("mqtt_host"))) {
+        Serial.println(F("Failed to parse MQTT host IP address"));
+        request->send(400, F("text/plain"), F("400: Invalid request"));
+        return;
+      }
+      eeprom_config.mqtt_host = mqtt_host;
+
+      eeprom_config.mqtt_port = request->arg("mqtt_port").toInt();
+
+      String mqtt_username = request->arg("mqtt_username");
+      strncpy(eeprom_config.mqtt_username, mqtt_username.c_str(), sizeof(eeprom_config.mqtt_username) - 1);
+      eeprom_config.mqtt_username[sizeof(eeprom_config.mqtt_username) - 1] = '\0';
+
+      String mqtt_password = request->arg("mqtt_password");
+      strncpy(eeprom_config.mqtt_password, mqtt_password.c_str(), sizeof(eeprom_config.mqtt_password) - 1);
+      eeprom_config.mqtt_password[sizeof(eeprom_config.mqtt_password) - 1] = '\0';
+
+      String mqtt_base_topic = request->arg("mqtt_base_topic");
+      strncpy(eeprom_config.mqtt_base_topic, mqtt_base_topic.c_str(), sizeof(eeprom_config.mqtt_base_topic) - 1);
+      eeprom_config.mqtt_base_topic[sizeof(eeprom_config.mqtt_base_topic) - 1] = '\0';
+
+      // The values where succesfully configured
+      eeprom_config.magic_number = EEPROM_MAGIC_NUMBER;
+
+      request->redirect(F("/")); // Redirect to the root
+    });
+
+    //httpServer.serveStatic(filename, SPIFFS, filename);
+    //httpServer.serveStatic("/fs", SPIFFS, "/"); // Attach filesystem root at URL /fs
+    httpServer.onNotFound([](AsyncWebServerRequest *request) {
+      request->send(404, F("text/plain"), F("404: Not Found"));
+    });
+
+    // Start the async HTTP server
+    httpServer.begin();
+
+    Serial.println(F("HTTP server started"));
+
+    // Indicate to the user that the access point is on
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+
+    // Wait for the values to be configured
+    while (eeprom_config.magic_number != EEPROM_MAGIC_NUMBER)
+      yield();
+
+    printEEPROMConfig(eeprom_config);
 
     // Replace values in RAM with the modified values
     // This does NOT make any changes to flash, all data is still in RAM
     EEPROM.put(0, eeprom_config);
+
+    // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
+    EEPROM.end();
+
+    // Give it some time to send the response
+    delay(1000);
+
+    Serial.println(F("Rebooting..."));
+    httpServer.end();
+    WiFi.softAPdisconnect(true);
+    ESP.reset();
   } else
     Serial.println(F("Read configuration values from EEPROM"));
 
-  // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
+  // Stop the EEPROM emulation
   EEPROM.end();
 
-  // The password and ThingSpeak API key are not printed for security reasons
-  Serial.printf("WiFi SSID: %s\n", eeprom_config.wifi_ssid);
-  Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
-    IPAddress(eeprom_config.mqtt_host).toString().c_str(), eeprom_config.mqtt_port,
-    eeprom_config.mqtt_username, eeprom_config.mqtt_base_topic);
+  printEEPROMConfig(eeprom_config);
 
   // Read battery voltage
   float voltage = analogRead(A0) * 4.1;
   Serial.print("Successfully read battery voltage: "); Serial.println(voltage);
-  
+
   blinkLED();
 
   // Read soil moisture
@@ -345,13 +458,13 @@ void setup() {
 
 #ifdef POST_TO_THINGSPEAK
   // Post to Thingspeak
-  if (client.connect(server,80)) {
-    client.print(String("GET ") + resource + eeprom_config.thingspeak_api_key +
+  if (client.connect(thingspeak_server, 80)) {
+    client.print(String("GET ") + thingspeak_resource + eeprom_config.thingspeak_api_key +
         "&field1=" + soil_moisture_filtered + "&field2=" + 0.0 +
-        "&field3=" + soil_moisture + "&field4=" + voltage + "&field5=" + 0.0 + 
-                " HTTP/1.1\r\n" + "Host: " + server + "\r\n" + "Connection: close\r\n\r\n");
-  
-    int timeout = 5 * 10; // 5 seconds             
+        "&field3=" + soil_moisture + "&field4=" + voltage + "&field5=" + 0.0 +
+                " HTTP/1.1\r\n" + "Host: " + thingspeak_server + "\r\n" + "Connection: close\r\n\r\n");
+
+    int timeout = 5 * 10; // 5 seconds
     while(!client.available() && (timeout-- > 0))
       delay(100);
 
@@ -367,6 +480,24 @@ void setup() {
   }
   client.stop();
 #endif
+
+/*
+  #include <ESP8266httpUpdate.h>
+  ESPhttpUpdate.setLedPin(LED_PIN);
+  ESPhttpUpdate.rebootOnUpdate(true);
+  t_httpUpdate_return ret = ESPhttpUpdate.update(client, "192.168.0.115", 80, "/esp/update/arduino.php", "optional current version string here");
+  switch(ret) {
+      case HTTP_UPDATE_FAILED:
+          Serial.printf("[Firmware] HTTP_UPDATE_FAILED Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+          break;
+      case HTTP_UPDATE_NO_UPDATES:
+          Serial.println("[Firmware] HTTP_UPDATE_NO_UPDATES\n");
+          break;
+      case HTTP_UPDATE_OK:
+          Serial.println("[Firmware] HTTP_UPDATE_OK\n");
+          break;
+  }
+*/
 
   Serial.print("Going into deep sleep for "); Serial.print(SLEEP_TIME); Serial.println(" min");
   // Go into long deep sleep
