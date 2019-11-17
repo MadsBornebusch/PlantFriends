@@ -75,9 +75,13 @@ AsyncMqttClient mqttClient;
 const char* thingspeak_server = "api.thingspeak.com";
 const char* thingspeak_resource = "/update?api_key=";
 
-// AP
+// Used for the AP (Access Point) - will be turned on at first boot
 static AsyncWebServer httpServer(80);
 static DNSServer dnsServer;
+
+// UART pins - if these are shorted at boot, then it will turn on the access point
+#define TX_PIN  (1U)
+#define RX_PIN  (3U)
 
 volatile unsigned long soil_timer;
 
@@ -230,16 +234,6 @@ void printEEPROMConfig(const eeprom_config_t &eeprom_config) {
 }
 
 void setup() {
-  Serial.begin(115200);
-  Serial.println("\nBooting");
-  Serial.flush();
-
-  // Make sure Wifi is off
-  WiFi.mode(WIFI_OFF);
-
-  // Handle long sleep
-  handleLongSleep();
-
   // Use x bytes of ESP8266 flash for "EEPROM" emulation
   // This loads x bytes from the flash into a array stored in RAM
   EEPROM.begin(sizeof(eeprom_config_t));
@@ -247,6 +241,25 @@ void setup() {
   // Read the configuration from EEPROM and check if it is valid
   eeprom_config_t eeprom_config;
   EEPROM.get(0, eeprom_config);
+
+  // Detect if we should go into AP mode by turning on the pull-up resistor on the TX pin
+  // then set the RX pin low and read the TX pin
+  pinMode(TX_PIN, INPUT_PULLUP);
+  pinMode(RX_PIN, OUTPUT);
+  digitalWrite(RX_PIN, LOW);
+
+  // If the pin is now low, then it means that RX and TX are shorted together
+  // Simply reset the magic number, so it goes into AP mode
+  bool turn_on_ap = !digitalRead(TX_PIN);
+  if (turn_on_ap)
+    eeprom_config.magic_number = 0;
+
+  // It is okay to turn on the serial interface even if the pins are shorted,
+  // as it will simply just transmit the values directly to itself
+  Serial.begin(115200);
+  Serial.println("\nBooting");
+  Serial.flush();
+
   if (eeprom_config.magic_number != EEPROM_MAGIC_NUMBER) {
     // Configure the hotspot
     // Note that we set the maximum number of connection to 1
@@ -381,6 +394,12 @@ void setup() {
   EEPROM.end();
 
   printEEPROMConfig(eeprom_config);
+
+  // Make sure Wifi is off
+  WiFi.mode(WIFI_OFF);
+
+  // Handle long sleep
+  handleLongSleep();
 
   // Read battery voltage
   float voltage = analogRead(A0) * 4.1;
