@@ -39,6 +39,24 @@ At first boot the module will turn on a hotspot with the SSID: `PlantWateringESP
 
 After logging on to the WiFI simply navigate to `192.168.4.1` to configure the module.
 
+# Home Assistant
+
+[Home Assistant](https://www.home-assistant.io/) example configuration:
+
+```yaml
+sensor:
+  - platform: mqtt
+    name: 'Soil moisture'
+    icon: mdi:sprout
+    unit_of_measurement: 'clk'
+    state_topic: 'avocado'
+    value_template: "{{ value_json.soil_moisture }}"
+  - platform: mqtt
+    name: 'Voltage'
+    icon: mdi:solar-panel-large
+    unit_of_measurement: 'V'
+    state_topic: 'avocado'
+    value_template: "{{ value_json.voltage }}"
 ```
 
 # TODO lists
@@ -54,6 +72,7 @@ After logging on to the WiFI simply navigate to `192.168.4.1` to configure the m
 - [ ] Make a struct for variables to save in RTC memory
 - [ ] Only check for OTA update once per day (24 hr)
 - [ ] [Use SPIFFS file system to store configuration file (soil moisture etc)](https://arduino-esp8266.readthedocs.io/en/latest/filesystem.html)
+- [ ] Set the water time and maximum time between watering via MQTT
 - [x] Use MQTT for data
 - [x] Show MQTT data in Home Assistant
 

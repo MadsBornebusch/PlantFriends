@@ -1,3 +1,4 @@
+#include <ArduinoJson.h>
 #include <AsyncMqttClient.h>
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
@@ -215,6 +216,14 @@ volatile uint16 publishedPacketId = -1;
 void onMqttPublish(uint16_t packetId) {
   publishedPacketId = packetId;
   //Serial.printf("Publish acknowledged - packet ID: %u\n", packetId);
+}
+
+bool mqttPublishBlocking(String topic, char *buffer, size_t length, int timeout) {
+  publishedPacketId = -1;
+  uint16_t packetId = mqttClient.publish(topic.c_str(), 2, false, buffer, length);
+  while (publishedPacketId != packetId && (timeout-- > 0))
+    delay(100);
+  return timeout > 0;
 }
 
 bool mqttPublishBlocking(String topic, String payload, int timeout) {
@@ -484,39 +493,40 @@ void setup() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  // Connect to the MQTT broker
-  mqttClient.onConnect(onMqttConnect);
-  mqttClient.onDisconnect(onMqttDisconnect);
-  //mqttClient.onSubscribe(onMqttSubscribe);
-  //mqttClient.onUnsubscribe(onMqttUnsubscribe);
-  //mqttClient.onMessage(onMqttMessage);
-  mqttClient.onPublish(onMqttPublish);
-  mqttClient.setServer(eeprom_config.mqtt_host, eeprom_config.mqtt_port);
-  mqttClient.setCredentials(eeprom_config.mqtt_username, eeprom_config.mqtt_password);
-  mqttClient.connect();
+  if (strlen(eeprom_config.mqtt_base_topic) > 0) {
+    // Connect to the MQTT broker
+    mqttClient.onConnect(onMqttConnect);
+    mqttClient.onDisconnect(onMqttDisconnect);
+    //mqttClient.onSubscribe(onMqttSubscribe);
+    //mqttClient.onUnsubscribe(onMqttUnsubscribe);
+    //mqttClient.onMessage(onMqttMessage);
+    mqttClient.onPublish(onMqttPublish);
+    mqttClient.setServer(eeprom_config.mqtt_host, eeprom_config.mqtt_port);
+    mqttClient.setCredentials(eeprom_config.mqtt_username, eeprom_config.mqtt_password);
+    mqttClient.connect();
 
-  int timeout = 5 * 10; // 5 seconds
-  while (!mqttClient.connected() && (timeout-- > 0));
-    delay(100);
+    int timeout = 5 * 10; // 5 seconds
+    while (!mqttClient.connected() && (timeout-- > 0));
+      delay(100);
 
-  // Post the data to MQTT
-  if (mqttClient.connected()) {
-    if (mqttPublishBlocking(eeprom_config.mqtt_base_topic + String("/soil_moisture"), String(soil_moisture), 5 * 10))
-      Serial.print(F("Successfully sent"));
-    else
-      Serial.print(F("Failed to send"));
-    Serial.println(F(" MQTT soil moisture"));
+    // Publish the data via MQTT
+    if (mqttClient.connected()) {
+      StaticJsonDocument<JSON_OBJECT_SIZE(2)> jsonDoc; // Create a document with room for the two objects
+      jsonDoc["soil_moisture"] = soil_moisture;
+      jsonDoc["voltage"] = voltage / 1000.0f;
 
-    if (mqttPublishBlocking(eeprom_config.mqtt_base_topic + String("/voltage"), String(voltage / 1000.0f, 3), 5 * 10))
-      Serial.print(F("Successfully sent"));
-    else
-      Serial.print(F("Failed to send"));
-    Serial.println(F(" MQTT voltage"));
-  } else
-    Serial.println(F("Failed to connect to MQTT broker"));
+      char buffer[64];
+      size_t n = serializeJson(jsonDoc, buffer);
+      if (mqttPublishBlocking(eeprom_config.mqtt_base_topic, buffer, n, 5 * 10))
+        Serial.printf("Successfully sent MQTT message: %s, length: %u\n", buffer, n);
+      else
+        Serial.print(F("Failed to send MQTT message due to timeout"));
+    } else
+      Serial.println(F("Failed to connect to MQTT broker"));
+  }
 
 #ifdef POST_TO_THINGSPEAK
-  // Post to Thingspeak
+  // Post to ThingSpeak
   if (client.connect(thingspeak_server, 80)) {
     client.print(String("GET ") + thingspeak_resource + eeprom_config.thingspeak_api_key +
         "&field1=" + soil_moisture_filtered + "&field2=" + 0.0 +
