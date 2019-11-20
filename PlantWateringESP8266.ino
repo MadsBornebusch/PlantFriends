@@ -51,7 +51,7 @@ typedef struct {
     char wifi_ssid[33]; // SSID should be a maximum of 32 characters according to the specs
     char wifi_password[33]; // Restrict password length to 32 characters
     char thingspeak_api_key[17]; // The API is 16 characters
-    uint32_t mqtt_host; // We only support IPv4 for now
+    char mqtt_host[51]; // Restrict URLs to 50 characters
     uint16_t mqtt_port;
     char mqtt_username[33]; // Just set these to 32 as well
     char mqtt_password[33];
@@ -238,7 +238,7 @@ void printEEPROMConfig(const eeprom_config_t &eeprom_config) {
     // The passwords and ThingSpeak API key are not printed for security reasons
   Serial.printf("WiFi SSID: %s\n", eeprom_config.wifi_ssid);
   Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
-    IPAddress(eeprom_config.mqtt_host).toString().c_str(), eeprom_config.mqtt_port,
+    eeprom_config.mqtt_host, eeprom_config.mqtt_port,
     eeprom_config.mqtt_username, eeprom_config.mqtt_base_topic);
 }
 
@@ -378,13 +378,8 @@ void setup() {
       strncpy(eeprom_config.thingspeak_api_key, request->arg("thingspeak_api_key").c_str(), sizeof(eeprom_config.thingspeak_api_key) - 1);
       eeprom_config.thingspeak_api_key[sizeof(eeprom_config.thingspeak_api_key) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      IPAddress mqtt_host;
-      if (!mqtt_host.fromString(request->arg("mqtt_host"))) {
-        Serial.println(F("Failed to parse MQTT host IP address"));
-        request->send(400, F("text/plain"), F("400: Invalid request"));
-        return;
-      }
-      eeprom_config.mqtt_host = mqtt_host;
+      strncpy(eeprom_config.mqtt_host, request->arg("mqtt_host").c_str(), sizeof(eeprom_config.mqtt_host) - 1);
+      eeprom_config.mqtt_host[sizeof(eeprom_config.mqtt_host) - 1] = '\0'; // Make sure the buffer is null-terminated
 
       eeprom_config.mqtt_port = request->arg("mqtt_port").toInt();
 
