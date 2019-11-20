@@ -506,7 +506,7 @@ void setup() {
     mqttClient.connect();
 
     int timeout = 5 * 10; // 5 seconds
-    while (!mqttClient.connected() && (timeout-- > 0));
+    while (!mqttClient.connected() && (timeout-- > 0))
       delay(100);
 
     // Publish the data via MQTT
