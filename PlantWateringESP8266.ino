@@ -526,28 +526,30 @@ void setup() {
   }
 
 #ifdef POST_TO_THINGSPEAK
-  // Post to ThingSpeak
-  if (client.connect(thingspeak_server, 80)) {
-    client.print(String("GET ") + thingspeak_resource + eeprom_config.thingspeak_api_key +
-        "&field1=" + soil_moisture_filtered + "&field2=" + 0.0 +
-        "&field3=" + soil_moisture + "&field4=" + voltage + "&field5=" + 0.0 +
-                " HTTP/1.1\r\n" + "Host: " + thingspeak_server + "\r\n" + "Connection: close\r\n\r\n");
+  if (strlen(eeprom_config.thingspeak_api_key) > 0) {
+    // Post to ThingSpeak
+    if (client.connect(thingspeak_server, 80)) {
+      client.print(String("GET ") + thingspeak_resource + eeprom_config.thingspeak_api_key +
+          "&field1=" + soil_moisture_filtered + "&field2=" + 0.0 +
+          "&field3=" + soil_moisture + "&field4=" + voltage + "&field5=" + 0.0 +
+                  " HTTP/1.1\r\n" + "Host: " + thingspeak_server + "\r\n" + "Connection: close\r\n\r\n");
 
-    int timeout = 5 * 10; // 5 seconds
-    while(!client.available() && (timeout-- > 0))
-      delay(100);
+      int timeout = 5 * 10; // 5 seconds
+      while(!client.available() && (timeout-- > 0))
+        delay(100);
 
-    while(client.available()){
-      Serial.write(client.read());
+      while(client.available()){
+        Serial.write(client.read());
+      }
+      Serial.println();
+      Serial.println("Successfully posted to Thingspeak!\n");
+    }else{
+      Serial.println("Problem posting data to Thingspeak.");
+      //delay(5000);
+      //ESP.restart();
     }
-    Serial.println();
-    Serial.println("Successfully posted to Thingspeak!\n");
-  }else{
-    Serial.println("Problem posting data to Thingspeak.");
-    //delay(5000);
-    //ESP.restart();
+    client.stop();
   }
-  client.stop();
 #endif
 
 /*
