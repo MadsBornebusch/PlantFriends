@@ -488,6 +488,7 @@ void setup() {
     delay(1000U * eeprom_config.watering_time);
     digitalWrite(WATERING_OUT, LOW);
     pinMode(WATERING_OUT, INPUT); // Save power
+    Serial.println(F("Done watering plant"));
     sleep_data.watering_delay_cycles = eeprom_config.watering_delay / eeprom_config.sleep_time; // This will be written to the RTC memory futher down
   } else if (sleep_data.watering_delay_cycles > 1)
     sleep_data.watering_delay_cycles--;
@@ -531,15 +532,28 @@ void setup() {
         DeserializationError error = deserializeJson(jsonDoc, payload);
         if (error) { // Test if parsing succeeds
           Serial.print(F("deserializeJson() failed: ")); Serial.println(error.c_str());
-          Serial.println(payload);
+          serializeJson(jsonDoc, Serial);
+          Serial.println();
           return;
         }
 
-        // Read the values - TODO: Check if the arguments are valid
-        uint8_t sleep_time = jsonDoc["sleep_time"].as<uint8_t>();
-        uint16_t watering_delay = jsonDoc["watering_delay"].as<uint16_t>();
-        uint16_t watering_threshold = jsonDoc["watering_threshold"].as<uint16_t>();
-        uint8_t watering_time = jsonDoc["watering_time"].as<uint8_t>();
+        JsonVariant sleep_time_variant = jsonDoc["sleep_time"];
+        JsonVariant watering_delay_variant = jsonDoc["watering_delay"];
+        JsonVariant watering_threshold_variant = jsonDoc["watering_threshold"];
+        JsonVariant watering_time_variant = jsonDoc["watering_time"];
+
+        if (sleep_time_variant.isNull() || watering_delay_variant.isNull() ||
+          watering_threshold_variant.isNull() || watering_time_variant.isNull()) {
+            Serial.print(F("The JSON payload does not contain all the keys: ")); serializeJson(jsonDoc, Serial);
+            Serial.println();
+            return;
+        }
+
+        // Read the values
+        uint8_t sleep_time = sleep_time_variant.as<uint8_t>();
+        uint16_t watering_delay = watering_delay_variant.as<uint16_t>();
+        uint16_t watering_threshold = watering_threshold_variant.as<uint16_t>();
+        uint8_t watering_time = watering_time_variant.as<uint8_t>();
 
         // Use x bytes of ESP8266 flash for "EEPROM" emulation
         // This loads x bytes from the flash into a array stored in RAM
