@@ -11,57 +11,68 @@
 #define WIFI_AP_SSID "PlantWateringESP8266"
 #define WIFI_AP_PASSWORD "plantsarecool"
 
-// Sleep time in minutes
-#define SLEEP_TIME 10
-// Sleep interval can safely be set from 1 to 30 minutes (possibly higher, but there is a limitation to sleep time with the esp8266). Should be smaller or equal to SLEEP_TIME
-#define SLEEP_INTERVAL 10
-// Calculate sleep interval and number of sleeps
-#define SLEEP_INTERVAL_US SLEEP_INTERVAL*60UL*1000000UL
-#define SLEEP_NUM SLEEP_TIME/SLEEP_INTERVAL
-// RTC memory address to use for sleep counter - note that the first 128 bytes are used by the OTA, so we set it to 256 to be safe
-#define SLEEP_DATA_ADDR 256
+// Default sleep time in minutes
+// Note that this can never be lower than "SLEEP_INTERVAL"
+#define DEFAULT_SLEEP_TIME (10U)
 
-// Minimum time between watering plant (minutes) and watering delay
-#define MIN_WATERING_TIME 60
-#define WATERING_DELAY MIN_WATERING_TIME/SLEEP_TIME
+// Default minimum time between watering plant (minutes) and watering delay
+#define DEFAULT_WATERING_DELAY (60U)
+
+// Default watering threshold in clock cycles
+#define DEFAULT_WATERING_THRESHOLD (3200U)
+
+// Default watering time in seconds
+#define DEFAULT_WATERING_TIME (3U)
+
+// Define number of soil measurements
+#define N_SOIL_MEAS (4U)
+
+// Sleep interval can safely be set from 1 to 30 minutes (possibly higher, but there is a limitation to sleep time with the esp8266). Should be smaller or equal to SLEEP_TIME
+#define SLEEP_INTERVAL (10U)
+// Calculate sleep interval and number of sleeps
+#define SLEEP_INTERVAL_US (SLEEP_INTERVAL * 60UL * 1000000UL)
+// RTC memory address to use for sleep counter - note that the first 128 bytes are used by the OTA, so we set it to 256 to be safe
+#define SLEEP_DATA_ADDR (256U)
 
 // Define whether to post to Thingspeak
 #define POST_TO_THINGSPEAK
 
 // Define soil output and measurement pins
-#define SOIL_OUT 14
-#define SOIL_IN 12
-// Define number of soil measurements
-#define N_SOIL_MEAS 4
+#define SOIL_OUT (14U)
+#define SOIL_IN (12U)
 
-// Define watering threshold and time
-#define WATERING_THRESHOLD 3200
-#define WATERING_TIME 3
 // Define watering pin
-#define WATERING_OUT 13
+#define WATERING_OUT (13U)
 
 // Define LED pin for built in LED (ESP-12 board)
-#define LED_PIN 2
+#define LED_PIN (2U)
 
 // This is used to determine if the EEPROM and RTC memory has been configured
 static const uint64_t MAGIC_NUMBER = 0x3b04cd9e94521f9a;
 
 typedef struct {
-    uint64_t magic_number; // Used to determine if the EEPROM have been configured or not
-    char wifi_ssid[33]; // SSID should be a maximum of 32 characters according to the specs
-    char wifi_password[33]; // Restrict password length to 32 characters
-    char thingspeak_api_key[17]; // The API is 16 characters
-    char mqtt_host[51]; // Restrict URLs to 50 characters
-    uint16_t mqtt_port;
-    char mqtt_username[33]; // Just set these to 32 as well
-    char mqtt_password[33];
-    char mqtt_base_topic[33];
+  // Can be set via the web interface
+  uint64_t magic_number; // Used to determine if the EEPROM have been configured or not
+  char wifi_ssid[33]; // SSID should be a maximum of 32 characters according to the specs
+  char wifi_password[33]; // Restrict password length to 32 characters
+  char thingspeak_api_key[17]; // The API is 16 characters
+  char mqtt_host[51]; // Restrict URLs to 50 characters
+  uint16_t mqtt_port;
+  char mqtt_username[33]; // Just set these to 32 as well
+  char mqtt_password[33];
+  char mqtt_base_topic[33];
+
+  // Can be set via MQTT
+  uint8_t sleep_time;
+  uint16_t watering_delay;
+  uint16_t watering_threshold;
+  uint8_t watering_time;
 } eeprom_config_t;
 
 typedef struct {
-    uint64_t magic_number; // Used to determine if the RTC memory has been configured or not
-    uint8_t sleep_num; // Stores the current sleep interval number
-    uint8_t watering_delay; // Stores the number of cycles the board must sleep before it will water the plant again
+  uint64_t magic_number; // Used to determine if the RTC memory has been configured or not
+  uint8_t sleep_num; // Stores the current sleep interval number
+  uint8_t watering_delay_cycles; // Stores the number of cycles the board must sleep before it will water the plant again
 } __attribute__ ((packed, aligned(4))) sleep_data_t; // The struct needs to be 4-byte aligned in the RTC memory
 
 // Wifi
@@ -143,7 +154,7 @@ void handleLongSleep(sleep_data_t *sleep_data) {
     Serial.println(F("Failed to read sleep data from the RTC memory"));
     sleep_data->magic_number = MAGIC_NUMBER;
     sleep_data->sleep_num = 1;
-    sleep_data->watering_delay = 1;
+    sleep_data->watering_delay_cycles = 1;
   }
 
   // Check if we should go back to sleep immediately
@@ -154,9 +165,9 @@ void handleLongSleep(sleep_data_t *sleep_data) {
   }
 }
 
-void longSleep(sleep_data_t *sleep_data) {
+void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_data) {
   sleep_data->magic_number = MAGIC_NUMBER;
-  sleep_data->sleep_num = SLEEP_NUM; // Set the number of times it should wakeup and go back to sleep again immediately
+  sleep_data->sleep_num = eeprom_config->sleep_time / SLEEP_INTERVAL; // Set the number of times it should wakeup and go back to sleep again immediately
   Serial.print("Number of sleep intervals: "); Serial.println(sleep_data->sleep_num);
   ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t));
   ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
@@ -192,15 +203,6 @@ void blinkLED(){
   pinMode(LED_PIN, INPUT); // Save power
 }
 
-void onMqttConnect(bool sessionPresent) {
-  Serial.println(F("Connected to MQTT"));
-  //Serial.printf("Session present: %d\n", sessionPresent);
-}
-
-void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
-  Serial.println(F("Disconnected from MQTT"));
-}
-
 volatile uint16 publishedPacketId = -1;
 
 void onMqttPublish(uint16_t packetId) {
@@ -226,6 +228,9 @@ void printEEPROMConfig(const eeprom_config_t &eeprom_config) {
   Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
     eeprom_config.mqtt_host, eeprom_config.mqtt_port,
     eeprom_config.mqtt_username, eeprom_config.mqtt_base_topic);
+  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold: %u, watering time: %u\n",
+    eeprom_config.sleep_time, eeprom_config.watering_delay,
+    eeprom_config.watering_threshold, eeprom_config.watering_time);
 }
 
 void setup() {
@@ -382,6 +387,12 @@ void setup() {
       strncpy(eeprom_config.mqtt_base_topic, request->arg("mqtt_base_topic").c_str(), sizeof(eeprom_config.mqtt_base_topic) - 1);
       eeprom_config.mqtt_base_topic[sizeof(eeprom_config.mqtt_base_topic) - 1] = '\0'; // Make sure the buffer is null-terminated
 
+      // Set the default settings
+      eeprom_config.sleep_time = DEFAULT_SLEEP_TIME;
+      eeprom_config.watering_delay = DEFAULT_WATERING_DELAY;
+      eeprom_config.watering_threshold = DEFAULT_WATERING_THRESHOLD;
+      eeprom_config.watering_time = DEFAULT_WATERING_TIME;
+
       // The values where succesfully configured
       eeprom_config.magic_number = MAGIC_NUMBER;
 
@@ -453,17 +464,17 @@ void setup() {
   Serial.print("Filtered soil moisture: "); Serial.println(soil_moisture_filtered);
 
   // Water plant
-  Serial.print("Watering delay: "); Serial.println(sleep_data.watering_delay);
-  if(soil_moisture <= WATERING_THRESHOLD && sleep_data.watering_delay <= 1){
+  Serial.print("Watering delay: "); Serial.println(sleep_data.watering_delay_cycles);
+  if(soil_moisture <= eeprom_config.watering_threshold && sleep_data.watering_delay_cycles <= 1){
     Serial.println("Watering plant!!");
     pinMode(WATERING_OUT, OUTPUT);
     analogWrite(WATERING_OUT,1023/4*3);
-    delay(WATERING_TIME*1000);
+    delay(1000U * eeprom_config.watering_time);
     digitalWrite(WATERING_OUT, LOW);
     pinMode(WATERING_OUT, INPUT); // Save power
-    sleep_data.watering_delay = WATERING_DELAY; // This will be written to the RTC memory futher down
-  } else if (sleep_data.watering_delay > 1)
-    sleep_data.watering_delay--;
+    sleep_data.watering_delay_cycles = eeprom_config.watering_delay / eeprom_config.sleep_time; // This will be written to the RTC memory futher down
+  } else if (sleep_data.watering_delay_cycles > 1)
+    sleep_data.watering_delay_cycles--;
 
   // Connect to Wifi
   WiFi.mode(WIFI_STA);
@@ -478,12 +489,81 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   if (strlen(eeprom_config.mqtt_base_topic) > 0) {
+    // Topic used to configuring the device over MQTT
+    const String config_topic = "plant/" + String(eeprom_config.mqtt_base_topic) + "/config";
+
     // Connect to the MQTT broker
-    mqttClient.onConnect(onMqttConnect);
-    mqttClient.onDisconnect(onMqttDisconnect);
-    //mqttClient.onSubscribe(onMqttSubscribe);
-    //mqttClient.onUnsubscribe(onMqttUnsubscribe);
-    //mqttClient.onMessage(onMqttMessage);
+    mqttClient.onConnect([&config_topic](bool sessionPresent) {
+      Serial.println(F("Connected to MQTT"));
+      //Serial.printf("Session present: %d\n", sessionPresent);
+
+      uint16_t packetIdSub = mqttClient.subscribe(config_topic.c_str(), 0);
+      Serial.printf("Subscribing to topic \"%s\", QoS 0, packetId: %u\n", config_topic.c_str(), packetIdSub);
+    });
+    mqttClient.onDisconnect([](AsyncMqttClientDisconnectReason reason) {
+      Serial.printf("Disconnected from MQTT: %d\n", reason);
+    });
+    mqttClient.onSubscribe([](uint16_t packetId, uint8_t qos) {
+      Serial.printf("Subscribe acknowledged for packetId: %u, QoS: %u\n", packetId, qos);
+    });
+    mqttClient.onUnsubscribe([](uint16_t packetId) {
+      Serial.printf("Unsubscribe acknowledged for packetId: %u\n", packetId);
+    });
+    mqttClient.onMessage([&config_topic](char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+      if (config_topic == topic) {
+        StaticJsonDocument<JSON_OBJECT_SIZE(4)> jsonDoc; // Create a document with room for the four objects
+        DeserializationError error = deserializeJson(jsonDoc, payload);
+        if (error) { // Test if parsing succeeds
+          Serial.print(F("deserializeJson() failed: ")); Serial.println(error.c_str());
+          Serial.println(payload);
+          return;
+        }
+
+        // Read the values - TODO: Check if the arguments are valid
+        uint8_t sleep_time = jsonDoc["sleep_time"].as<uint8_t>();
+        uint16_t watering_delay = jsonDoc["watering_delay"].as<uint16_t>();
+        uint16_t watering_threshold = jsonDoc["watering_threshold"].as<uint16_t>();
+        uint8_t watering_time = jsonDoc["watering_time"].as<uint8_t>();
+
+        // Use x bytes of ESP8266 flash for "EEPROM" emulation
+        // This loads x bytes from the flash into a array stored in RAM
+        EEPROM.begin(sizeof(eeprom_config_t));
+
+        // Read the configuration from EEPROM and check if it is valid
+        eeprom_config_t eeprom_config;
+        EEPROM.get(0, eeprom_config);
+
+        if (eeprom_config.magic_number == MAGIC_NUMBER) {
+          bool changed = eeprom_config.sleep_time != sleep_time ||
+            eeprom_config.watering_delay != watering_delay ||
+            eeprom_config.watering_threshold != watering_threshold ||
+            eeprom_config.watering_time != watering_time;
+
+          // TODO: Just use the local varialble and take a mutex
+          if (changed) {
+            eeprom_config.sleep_time = sleep_time;
+            eeprom_config.watering_delay = watering_delay;
+            eeprom_config.watering_threshold = watering_threshold;
+            eeprom_config.watering_time = watering_time;
+
+            Serial.println(F("Received new MQTT config"));
+            printEEPROMConfig(eeprom_config);
+
+            // Replace values in RAM with the modified values
+            // This does NOT make any changes to flash, all data is still in RAM
+            EEPROM.put(0, eeprom_config);
+          }
+        } else
+          Serial.println(F("Ignoring new MQTT config, as EEPROM has not been configured"));
+
+        // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
+        EEPROM.end();
+      } else {
+        Serial.print(F("Unknown MQTT message received - topic: "));
+        Serial.printf("%s, QoS: %u, dup: %d, retain: %d, length: %u, index: %u, total: %u\n",
+          topic, properties.qos, properties.dup, properties.retain, len, index, total);
+      }
+    });
     mqttClient.onPublish(onMqttPublish);
     mqttClient.setServer(eeprom_config.mqtt_host, eeprom_config.mqtt_port);
     mqttClient.setCredentials(eeprom_config.mqtt_username, eeprom_config.mqtt_password);
@@ -495,18 +575,25 @@ void setup() {
 
     // Publish the data via MQTT
     if (mqttClient.connected()) {
-      StaticJsonDocument<JSON_OBJECT_SIZE(2)> jsonDoc; // Create a document with room for the two objects
+      StaticJsonDocument<JSON_OBJECT_SIZE(6)> jsonDoc; // Create a document with room for the two objects
       jsonDoc["soil_moisture"] = soil_moisture;
       jsonDoc["voltage"] = voltage / 1000.0f;
+      jsonDoc["sleep_time"] = eeprom_config.sleep_time;
+      jsonDoc["watering_delay"] = eeprom_config.watering_delay;
+      jsonDoc["watering_threshold"] = eeprom_config.watering_threshold;
+      jsonDoc["watering_time"] = eeprom_config.watering_time;
 
-      char buffer[64];
+      char buffer[150];
       size_t n = serializeJson(jsonDoc, buffer);
-      if (mqttPublishBlocking(eeprom_config.mqtt_base_topic, buffer, n, 5 * 10))
+      if (mqttPublishBlocking("plant/" + String(eeprom_config.mqtt_base_topic) + "/state", buffer, n, 5 * 10))
         Serial.printf("Successfully sent MQTT message: %s, length: %u\n", buffer, n);
       else
         Serial.print(F("Failed to send MQTT message due to timeout"));
     } else
       Serial.println(F("Failed to connect to MQTT broker"));
+
+    // Give it some time to receive a new configuration
+    delay(1000); // TODO: Is this needed?
   }
 
 #ifdef POST_TO_THINGSPEAK
@@ -554,10 +641,10 @@ void setup() {
   }
 */
 
-  Serial.print("Going into deep sleep for "); Serial.print(SLEEP_TIME); Serial.println(" min");
+  Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config.sleep_time); Serial.println(F(" min"));
 
   // Go into long deep sleep
-  longSleep(&sleep_data);
+  longSleep(&eeprom_config, &sleep_data);
 }
 
 void loop() {

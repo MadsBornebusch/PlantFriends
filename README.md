@@ -74,7 +74,7 @@ sensor:
 - [x] Make a struct for variables to save in RTC memory
 - [ ] Only check for OTA update once per day (24 hr)
 - [ ] [Use SPIFFS file system to store configuration file (soil moisture etc)](https://arduino-esp8266.readthedocs.io/en/latest/filesystem.html)
-- [ ] Set the sleep time, min watering time, water threshold and water time via MQTT
+- [x] Set the sleep time, watering delay, water threshold and water time via MQTT
 - [ ] [Support secure MQTT (SSL)](https://github.com/marvinroger/async-mqtt-client/blob/master/examples/FullyFeaturedSSL/src/main.cpp)
 - [x] Use MQTT for data
 - [x] Show MQTT data in Home Assistant
