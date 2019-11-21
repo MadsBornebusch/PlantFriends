@@ -47,6 +47,10 @@
 // Define LED pin for built in LED (ESP-12 board)
 #define LED_PIN (2U)
 
+// UART pins - if these are shorted at boot, then it will turn on the access point
+#define TX_PIN (1U)
+#define RX_PIN (3U)
+
 // This is used to determine if the EEPROM and RTC memory has been configured
 static const uint64_t MAGIC_NUMBER = 0x3b04cd9e94521f9a;
 
@@ -97,11 +101,11 @@ const char* thingspeak_resource = "/update?api_key=";
 static AsyncWebServer httpServer(80);
 static DNSServer dnsServer;
 
-// UART pins - if these are shorted at boot, then it will turn on the access point
-#define TX_PIN  (1U)
-#define RX_PIN  (3U)
+// Timer used for measuring the time it takes for the voltage to rise over the capacitive sensor
+static volatile uint32_t soil_timer;
 
-volatile unsigned long soil_timer;
+// Used to check if a MQTT package was succesfully sent
+static volatile uint16 publishedPacketId = -1;
 
 /*
 long getMedian(long &array, uint8_t n){
@@ -121,14 +125,15 @@ long getMedian(long &array, uint8_t n){
 }
 */
 
-long getMean(long *array, uint8_t n){
+static long getMean(int *array, uint8_t n) {
   long sum = 0;
-  for(uint8_t i = 0; i<n; i++)
+  for (uint8_t i = 0; i < n; i++)
     sum += array[i];
   return sum/n;
 }
 
-long getMeanWithoutMinMax(long *array, uint8_t n){
+/*
+static long getMeanWithoutMinMax(long *array, uint8_t n){
   long sum = 0;
   long min = 1000000;
   long max = 0;
@@ -147,8 +152,15 @@ long getMeanWithoutMinMax(long *array, uint8_t n){
   }
   return sum/n_meas;
 }
+*/
 
-void handleLongSleep(sleep_data_t *sleep_data) {
+static void handleLongSleep(sleep_data_t *sleep_data) {
+  if (sizeof(sleep_data_t) % 4 != 0) {
+    Serial.println(F("Sleep data is NOT 4 byte aligned! Rebooting..."));
+    delay(5000);
+    ESP.restart();
+  }
+
   ESP.rtcUserMemoryRead(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t));
   if (sleep_data->magic_number != MAGIC_NUMBER) {
     Serial.println(F("Failed to read sleep data from the RTC memory"));
@@ -165,7 +177,13 @@ void handleLongSleep(sleep_data_t *sleep_data) {
   }
 }
 
-void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_data) {
+static void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_data) {
+  if (sizeof(sleep_data_t) % 4 != 0) {
+    Serial.println(F("Sleep data is NOT 4 byte aligned! Rebooting..."));
+    delay(5000);
+    ESP.restart();
+  }
+
   sleep_data->magic_number = MAGIC_NUMBER;
   sleep_data->sleep_num = eeprom_config->sleep_time / SLEEP_INTERVAL; // Set the number of times it should wakeup and go back to sleep again immediately
   Serial.print("Number of sleep intervals: "); Serial.println(sleep_data->sleep_num);
@@ -173,44 +191,41 @@ void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_data) {
   ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
 }
 
-void readSoil(long *soil_measurements, int n_meas){
+static void readSoil(int *soil_measurements, uint8_t n_meas) {
   pinMode(SOIL_OUT, OUTPUT);
   pinMode(SOIL_IN, INPUT);
 
   int current_val;
-  for(int i=0; i<n_meas; i++){
+  for (uint8_t i = 0; i < n_meas; i++) {
     Serial.print(i); Serial.print(": ");
     digitalWrite(SOIL_OUT, LOW);
     delay(10);
     attachInterrupt(digitalPinToInterrupt(SOIL_IN), interrupt_routine, CHANGE);
-    unsigned long timer_start = ESP.getCycleCount();
+    uint32_t timer_start = ESP.getCycleCount();
     digitalWrite(SOIL_OUT, HIGH);
     delay(1000);
     detachInterrupt(digitalPinToInterrupt(SOIL_IN));
-    current_val = (soil_timer-timer_start);
+    current_val = (soil_timer - timer_start);
     Serial.println(current_val);
-
     soil_measurements[i] = current_val;
   }
 
   pinMode(SOIL_OUT, INPUT); // Save power
 }
 
-void blinkLED(){
+static void blinkLED() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
   delay(50);
   pinMode(LED_PIN, INPUT); // Save power
 }
 
-volatile uint16 publishedPacketId = -1;
-
-void onMqttPublish(uint16_t packetId) {
+static void onMqttPublish(uint16_t packetId) {
   publishedPacketId = packetId;
   //Serial.printf("Publish acknowledged - packet ID: %u\n", packetId);
 }
 
-bool mqttPublishBlocking(String topic, const char *buffer, size_t length, int timeout) {
+static bool mqttPublishBlocking(String topic, const char *buffer, size_t length, int timeout) {
   publishedPacketId = -1;
   uint16_t packetId = mqttClient.publish(topic.c_str(), 2, false, buffer, length);
   while (publishedPacketId != packetId && (timeout-- > 0))
@@ -218,52 +233,7 @@ bool mqttPublishBlocking(String topic, const char *buffer, size_t length, int ti
   return timeout > 0;
 }
 
-bool mqttPublishBlocking(String topic, String payload, int timeout) {
-  return mqttPublishBlocking(topic, payload.c_str(), payload.length(), timeout);
-}
-
-void printEEPROMConfig(const eeprom_config_t &eeprom_config) {
-    // The passwords and ThingSpeak API key are not printed for security reasons
-  Serial.printf("WiFi SSID: %s\n", eeprom_config.wifi_ssid);
-  Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
-    eeprom_config.mqtt_host, eeprom_config.mqtt_port,
-    eeprom_config.mqtt_username, eeprom_config.mqtt_base_topic);
-  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold: %u, watering time: %u\n",
-    eeprom_config.sleep_time, eeprom_config.watering_delay,
-    eeprom_config.watering_threshold, eeprom_config.watering_time);
-}
-
-void setup() {
-  // Use x bytes of ESP8266 flash for "EEPROM" emulation
-  // This loads x bytes from the flash into a array stored in RAM
-  EEPROM.begin(sizeof(eeprom_config_t));
-
-  // Read the configuration from EEPROM and check if it is valid
-  eeprom_config_t eeprom_config;
-  EEPROM.get(0, eeprom_config);
-
-  // Detect if we should go into AP mode by turning on the pull-up resistor on the TX pin
-  // then set the RX pin low and read the TX pin
-  pinMode(TX_PIN, INPUT_PULLUP);
-  pinMode(RX_PIN, OUTPUT);
-  digitalWrite(RX_PIN, LOW);
-
-  // If the pin is now low, then it means that RX and TX are shorted together
-  // Simply reset the magic number, so it goes into AP mode
-  if (!digitalRead(TX_PIN))
-    eeprom_config.magic_number = 0;
-
-  // Save power
-  pinMode(TX_PIN, INPUT);
-  pinMode(RX_PIN, INPUT);
-
-  // It is okay to turn on the serial interface even if the pins are shorted,
-  // as it will simply just transmit the values directly to itself
-  Serial.begin(115200);
-  Serial.println("\nBooting");
-  Serial.flush();
-
-  if (eeprom_config.magic_number != MAGIC_NUMBER) {
+static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
     // Configure the hotspot
     // Note that we set the maximum number of connection to 1
     int channel = 1, ssid_hidden = 0, max_connection = 1;
@@ -364,37 +334,37 @@ void setup() {
         return;
       }
 
-      strncpy(eeprom_config.wifi_ssid, request->arg("wifi_ssid").c_str(), sizeof(eeprom_config.wifi_ssid) - 1);
-      eeprom_config.wifi_ssid[sizeof(eeprom_config.wifi_ssid) - 1] = '\0'; // Make sure the buffer is null-terminated
+      strncpy(eeprom_config->wifi_ssid, request->arg("wifi_ssid").c_str(), sizeof(eeprom_config->wifi_ssid) - 1);
+      eeprom_config->wifi_ssid[sizeof(eeprom_config->wifi_ssid) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      strncpy(eeprom_config.wifi_password, request->arg("wifi_password").c_str(), sizeof(eeprom_config.wifi_password) - 1);
-      eeprom_config.wifi_password[sizeof(eeprom_config.wifi_password) - 1] = '\0'; // Make sure the buffer is null-terminated
+      strncpy(eeprom_config->wifi_password, request->arg("wifi_password").c_str(), sizeof(eeprom_config->wifi_password) - 1);
+      eeprom_config->wifi_password[sizeof(eeprom_config->wifi_password) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      strncpy(eeprom_config.thingspeak_api_key, request->arg("thingspeak_api_key").c_str(), sizeof(eeprom_config.thingspeak_api_key) - 1);
-      eeprom_config.thingspeak_api_key[sizeof(eeprom_config.thingspeak_api_key) - 1] = '\0'; // Make sure the buffer is null-terminated
+      strncpy(eeprom_config->thingspeak_api_key, request->arg("thingspeak_api_key").c_str(), sizeof(eeprom_config->thingspeak_api_key) - 1);
+      eeprom_config->thingspeak_api_key[sizeof(eeprom_config->thingspeak_api_key) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      strncpy(eeprom_config.mqtt_host, request->arg("mqtt_host").c_str(), sizeof(eeprom_config.mqtt_host) - 1);
-      eeprom_config.mqtt_host[sizeof(eeprom_config.mqtt_host) - 1] = '\0'; // Make sure the buffer is null-terminated
+      strncpy(eeprom_config->mqtt_host, request->arg("mqtt_host").c_str(), sizeof(eeprom_config->mqtt_host) - 1);
+      eeprom_config->mqtt_host[sizeof(eeprom_config->mqtt_host) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      eeprom_config.mqtt_port = request->arg("mqtt_port").toInt();
+      eeprom_config->mqtt_port = request->arg("mqtt_port").toInt();
 
-      strncpy(eeprom_config.mqtt_username, request->arg("mqtt_username").c_str(), sizeof(eeprom_config.mqtt_username) - 1);
-      eeprom_config.mqtt_username[sizeof(eeprom_config.mqtt_username) - 1] = '\0'; // Make sure the buffer is null-terminated
+      strncpy(eeprom_config->mqtt_username, request->arg("mqtt_username").c_str(), sizeof(eeprom_config->mqtt_username) - 1);
+      eeprom_config->mqtt_username[sizeof(eeprom_config->mqtt_username) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      strncpy(eeprom_config.mqtt_password, request->arg("mqtt_password").c_str(), sizeof(eeprom_config.mqtt_password) - 1);
-      eeprom_config.mqtt_password[sizeof(eeprom_config.mqtt_password) - 1] = '\0'; // Make sure the buffer is null-terminated
+      strncpy(eeprom_config->mqtt_password, request->arg("mqtt_password").c_str(), sizeof(eeprom_config->mqtt_password) - 1);
+      eeprom_config->mqtt_password[sizeof(eeprom_config->mqtt_password) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      strncpy(eeprom_config.mqtt_base_topic, request->arg("mqtt_base_topic").c_str(), sizeof(eeprom_config.mqtt_base_topic) - 1);
-      eeprom_config.mqtt_base_topic[sizeof(eeprom_config.mqtt_base_topic) - 1] = '\0'; // Make sure the buffer is null-terminated
+      strncpy(eeprom_config->mqtt_base_topic, request->arg("mqtt_base_topic").c_str(), sizeof(eeprom_config->mqtt_base_topic) - 1);
+      eeprom_config->mqtt_base_topic[sizeof(eeprom_config->mqtt_base_topic) - 1] = '\0'; // Make sure the buffer is null-terminated
 
       // Set the default settings
-      eeprom_config.sleep_time = DEFAULT_SLEEP_TIME;
-      eeprom_config.watering_delay = DEFAULT_WATERING_DELAY;
-      eeprom_config.watering_threshold = DEFAULT_WATERING_THRESHOLD;
-      eeprom_config.watering_time = DEFAULT_WATERING_TIME;
+      eeprom_config->sleep_time = DEFAULT_SLEEP_TIME;
+      eeprom_config->watering_delay = DEFAULT_WATERING_DELAY;
+      eeprom_config->watering_threshold = DEFAULT_WATERING_THRESHOLD;
+      eeprom_config->watering_time = DEFAULT_WATERING_TIME;
 
       // The values where succesfully configured
-      eeprom_config.magic_number = MAGIC_NUMBER;
+      eeprom_config->magic_number = MAGIC_NUMBER;
 
       request->redirect(F("/")); // Redirect to the root
     });
@@ -407,14 +377,60 @@ void setup() {
     httpServer.begin();
 
     Serial.println(F("HTTP server started"));
+}
+
+static void printEEPROMConfig(const eeprom_config_t &eeprom_config) {
+    // The passwords and ThingSpeak API key are not printed for security reasons
+  Serial.printf("WiFi SSID: %s\n", eeprom_config.wifi_ssid);
+  Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
+    eeprom_config.mqtt_host, eeprom_config.mqtt_port,
+    eeprom_config.mqtt_username, eeprom_config.mqtt_base_topic);
+  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold: %u, watering time: %u\n",
+    eeprom_config.sleep_time, eeprom_config.watering_delay,
+    eeprom_config.watering_threshold, eeprom_config.watering_time);
+}
+
+void setup() {
+  // Use x bytes of ESP8266 flash for "EEPROM" emulation
+  // This loads x bytes from the flash into a array stored in RAM
+  EEPROM.begin(sizeof(eeprom_config_t));
+
+  // Read the configuration from EEPROM and check if it is valid
+  eeprom_config_t eeprom_config;
+  EEPROM.get(0, eeprom_config);
+
+  // Detect if we should go into AP mode by turning on the pull-up resistor on the TX pin
+  // then set the RX pin low and read the TX pin
+  pinMode(TX_PIN, INPUT_PULLUP);
+  pinMode(RX_PIN, OUTPUT);
+  digitalWrite(RX_PIN, LOW);
+
+  // If the pin is now low, then it means that RX and TX are shorted together
+  // Simply reset the magic number, so it goes into AP mode
+  if (!digitalRead(TX_PIN))
+    eeprom_config.magic_number = 0;
+
+  // Save power
+  pinMode(TX_PIN, INPUT);
+  pinMode(RX_PIN, INPUT);
+
+  // It is okay to turn on the serial interface even if the pins are shorted,
+  // as it will simply just transmit the values directly to itself
+  Serial.begin(115200);
+  Serial.println(F("\nBooting"));
+  Serial.flush();
+
+  if (eeprom_config.magic_number != MAGIC_NUMBER) {
+    startAsyncHotspot(&eeprom_config);
 
     // Indicate to the user that the access point is on
     pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, LOW);
 
     // Wait for the values to be configured
-    while (eeprom_config.magic_number != MAGIC_NUMBER)
+    while (eeprom_config.magic_number != MAGIC_NUMBER) {
+      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
       delay(100);
+    }
 
     printEEPROMConfig(eeprom_config);
 
@@ -449,26 +465,26 @@ void setup() {
 
   // Read battery voltage
   float voltage = (float)analogRead(A0) * 4.1f;
-  Serial.print("Successfully read battery voltage: "); Serial.println(voltage);
+  Serial.print(F("Battery voltage: ")); Serial.println(voltage);
 
   blinkLED();
 
   // Read soil moisture
-  long soil_measurements[N_SOIL_MEAS];
+  int soil_measurements[N_SOIL_MEAS];
   readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
-  Serial.println("Read soil moisture");
+  Serial.println(F("Read soil moisture"));
   int soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
-  Serial.println("Calculated mean soil moisture");
-  int soil_moisture_filtered = getMeanWithoutMinMax(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
-  Serial.print("Successfully found soil moisture: "); Serial.println(soil_moisture);
-  Serial.print("Filtered soil moisture: "); Serial.println(soil_moisture_filtered);
+  Serial.println(F("Calculated mean soil moisture"));
+  //int soil_moisture_filtered = getMeanWithoutMinMax(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+  Serial.print(F("Successfully found soil moisture: ")); Serial.println(soil_moisture);
+  //Serial.print("Filtered soil moisture: "); Serial.println(soil_moisture_filtered);
 
   // Water plant
-  Serial.print("Watering delay: "); Serial.println(sleep_data.watering_delay_cycles);
+  Serial.print(F("Watering delay: ")); Serial.println(sleep_data.watering_delay_cycles);
   if(soil_moisture <= eeprom_config.watering_threshold && sleep_data.watering_delay_cycles <= 1){
-    Serial.println("Watering plant!!");
+    Serial.println(F("Watering plant!!"));
     pinMode(WATERING_OUT, OUTPUT);
-    analogWrite(WATERING_OUT,1023/4*3);
+    analogWrite(WATERING_OUT, 1023U * 3U / 4U);
     delay(1000U * eeprom_config.watering_time);
     digitalWrite(WATERING_OUT, LOW);
     pinMode(WATERING_OUT, INPUT); // Save power
@@ -480,12 +496,12 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(eeprom_config.wifi_ssid, eeprom_config.wifi_password);
   while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    Serial.println("Connection Failed! Rebooting...");
+    Serial.println(F("Connection Failed! Rebooting..."));
     delay(5000);
     ESP.restart();
   }
-  Serial.println("Wifi connected");
-  Serial.print("IP address: ");
+  Serial.println(F("Wifi connected"));
+  Serial.print(F("IP address: "));
   Serial.println(WiFi.localIP());
 
   if (strlen(eeprom_config.mqtt_base_topic) > 0) {
@@ -553,11 +569,11 @@ void setup() {
             // This does NOT make any changes to flash, all data is still in RAM
             EEPROM.put(0, eeprom_config);
           }
+
+          // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
+          EEPROM.end();
         } else
           Serial.println(F("Ignoring new MQTT config, as EEPROM has not been configured"));
-
-        // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
-        EEPROM.end();
       } else {
         Serial.print(F("Unknown MQTT message received - topic: "));
         Serial.printf("%s, QoS: %u, dup: %d, retain: %d, length: %u, index: %u, total: %u\n",
@@ -601,8 +617,7 @@ void setup() {
     // Post to ThingSpeak
     if (client.connect(thingspeak_server, 80)) {
       client.print(String("GET ") + thingspeak_resource + eeprom_config.thingspeak_api_key +
-          "&field1=" + soil_moisture_filtered + "&field2=" + 0.0 +
-          "&field3=" + soil_moisture + "&field4=" + voltage + "&field5=" + 0.0 +
+          "&field1=" + soil_moisture + "&field2=" + voltage + "&field3=" + 0.0 +
                   " HTTP/1.1\r\n" + "Host: " + thingspeak_server + "\r\n" + "Connection: close\r\n\r\n");
 
       int timeout = 5 * 10; // 5 seconds
@@ -613,9 +628,9 @@ void setup() {
         Serial.write(client.read());
       }
       Serial.println();
-      Serial.println("Successfully posted to Thingspeak!\n");
+      Serial.println(F("Successfully posted to Thingspeak!\n"));
     }else{
-      Serial.println("Problem posting data to Thingspeak.");
+      Serial.println(F("Problem posting data to Thingspeak."));
       //delay(5000);
       //ESP.restart();
     }
@@ -648,7 +663,7 @@ void setup() {
 }
 
 void loop() {
-  Serial.println("Somewhere we took a wrong turn and ended up in the main loop...");
+  Serial.println(F("Somewhere we took a wrong turn and ended up in the main loop..."));
   ESP.restart();
 }
 
