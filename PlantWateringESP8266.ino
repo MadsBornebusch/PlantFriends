@@ -259,69 +259,32 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
         // Som additional css to make it look a little nicer
         request->send(SPIFFS, "/pure-extra-min.css", "text/css");
       });
-      //httpServer.serveStatic(filename, SPIFFS, filename);
-      //httpServer.serveStatic("/fs", SPIFFS, "/"); // Attach filesystem root at URL /fs
     } else
       Serial.println("An Error has occurred while mounting SPIFFS");
 
-    // Show a form on the root page
     httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-      AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
-      response->addHeader(F("Cache-Control"), F("no-cache,no-store,must-revalidate"));
-      response->addHeader(F("Pragma"), F("no-cache"));
-      response->addHeader(F("Expires"), F("-1"));
+      auto processor = [](const String &var) {
+        if (var == "WIFI_SSID")
+          return String(WIFI_SSID);
+        else if (var == "WIFI_PASSWORD")
+          return String(WIFI_PASSWORD);
+        else if (var == "THINGSPEAK_API_KEY")
+          return String(THINGSPEAK_API_KEY);
+        else if (var == "MQTT_HOST")
+          return String(MQTT_HOST);
+        else if (var == "MQTT_PORT")
+          return String(MQTT_PORT);
+        else if (var == "MQTT_USERNAME")
+          return String(MQTT_USERNAME);
+        else if (var == "MQTT_PASSWORD")
+          return String(MQTT_PASSWORD);
+        else if (var == "MQTT_BASE_TOPIC")
+          return String(MQTT_BASE_TOPIC);
+        return String();
+      };
 
-      // Format the HTML response
-      response->print(F("<html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">"));
-      response->print(F("<link rel=\"stylesheet\" type=\"text/css\" href=\"pure-min.css\">"));
-      response->print(F("<link rel=\"stylesheet\" type=\"text/css\" href=\"pure-extra-min.css\">"));
-      response->print(F("</head><body style=\"margin:50px auto;width:50%\">"));
-
-      response->print(F("<form action=\"/config\" method=\"POST\" class=\"pure-form pure-form-aligned\">"));
-
-      response->print(F("<div class=\"pure-control-group\">"));
-      response->print(F("<label></label>")); // Added, so it's the heading gets aligned with the inputs
-      response->print(F("<h2>Settings</h2>"));
-      response->print(F("</div>"));
-
-      response->print(F("<fieldset class=\"pure-group\">"));
-      response->print(F("<div class=\"pure-control-group\">"));
-      response->print(F("<label for=\"wifi_ssid\">WiFi SSID</label>"));
-      response->print(F("<input type=\"text\" name=\"wifi_ssid\" value=\"")); response->print(WIFI_SSID); response->print(F("\">"));
-      response->print(F("</div><div class=\"pure-control-group\">"));
-      response->print(F("<label for=\"wifi_password\">WiFi password</label>"));
-      response->print(F("<input type=\"password\" name=\"wifi_password\" value=\"")); response->print(WIFI_PASSWORD); response->print(F("\">"));
-      response->print(F("</div></fieldset>"));
-
-      response->print(F("<fieldset class=\"pure-group\">"));
-      response->print(F("<div class=\"pure-control-group\">"));
-      response->print(F("<label for=\"thingspeak_api_key\">ThingSpeak API key</label>"));
-      response->print(F("<input type=\"password\" name=\"thingspeak_api_key\" value=\"")); response->print(THINGSPEAK_API_KEY); response->print(F("\">"));
-      response->print(F("</div></fieldset>"));
-
-      response->print(F("<fieldset class=\"pure-group\">"));
-      response->print(F("<div class=\"pure-control-group\">"));
-      response->print(F("<label for=\"mqtt_host\">MQTT host</label>"));
-      response->print(F("<input type=\"text\" name=\"mqtt_host\" value=\"")); response->print(MQTT_HOST); response->print(F("\">"));
-      response->print(F("</div><div class=\"pure-control-group\">"));
-      response->print(F("<label for=\"mqtt_port\">MQTT port</label>"));
-      response->print(F("<input type=\"text\" name=\"mqtt_port\" value=\"")); response->print(MQTT_PORT); response->print(F("\">"));
-      response->print(F("</div><div class=\"pure-control-group\">"));
-      response->print(F("<label for=\"mqtt_username\">MQTT username</label>"));
-      response->print(F("<input type=\"text\" name=\"mqtt_username\" value=\"")); response->print(MQTT_USERNAME); response->print(F("\">"));
-      response->print(F("</div><div class=\"pure-control-group\">"));
-      response->print(F("<label for=\"mqtt_password\">MQTT password</label>"));
-      response->print(F("<input type=\"password\" name=\"mqtt_password\" value=\"")); response->print(MQTT_PASSWORD); response->print(F("\">"));
-      response->print(F("</div><div class=\"pure-control-group\">"));
-      response->print(F("<label for=\"mqtt_base_topic\">MQTT base topic</label>"));
-      response->print(F("<input type=\"text\" name=\"mqtt_base_topic\" value=\"")); response->print(MQTT_BASE_TOPIC); response->print(F("\">"));
-      response->print(F("</div></fieldset>"));
-
-      response->print(F("<div class=\"pure-controls\">"));
-      response->print(F("<button type=\"submit\" class=\"pure-button pure-button-primary\">Submit</button"));
-      response->print(F("</div></form></body></html>"));
-
-      request->send(response); // Send the response
+      // Send the index as a template
+      request->send(SPIFFS, "/index.html", String(), false, processor);
     });
 
     // Handle the post request

@@ -1,0 +1,58 @@
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="pure-min.css">
+    <link rel="stylesheet" type="text/css" href="pure-extra-min.css">
+</head>
+
+<body>
+    <form action="/config" method="POST" class="pure-form pure-form-aligned">
+        <div class="pure-control-group">
+            <label></label>
+            <h2>Settings</h2>
+        </div>
+        <fieldset class="pure-group">
+            <div class="pure-control-group">
+                <label for="wifi_ssid">WiFi SSID</label>
+                <input type="text" name="wifi_ssid" value="%WIFI_SSID%">
+            </div>
+            <div class="pure-control-group">
+                <label for="wifi_password">WiFi password</label>
+                <input type="password" name="wifi_password" value="%WIFI_PASSWORD%">
+            </div>
+        </fieldset>
+        <fieldset class="pure-group">
+            <div class="pure-control-group">
+                <label for="thingspeak_api_key">ThingSpeak API key</label>
+                <input type="password" name="thingspeak_api_key" value="%THINGSPEAK_API_KEY%">
+            </div>
+        </fieldset>
+        <fieldset class="pure-group">
+            <div class="pure-control-group">
+                <label for="mqtt_host">MQTT host</label>
+                <input type="text" name="mqtt_host" value="%MQTT_HOST%">
+            </div>
+            <div class="pure-control-group">
+                <label for="mqtt_port">MQTT port</label>
+                <input type="text" name="mqtt_port" value="%MQTT_PORT%">
+            </div>
+            <div class="pure-control-group">
+                <label for="mqtt_username">MQTT username</label>
+                <input type="text" name="mqtt_username" value="%MQTT_USERNAME%">
+            </div>
+            <div class="pure-control-group">
+                <label for="mqtt_password">MQTT password</label>
+                <input type="password" name="mqtt_password" value="%MQTT_PASSWORD%">
+            </div>
+            <div class="pure-control-group">
+                <label for="mqtt_base_topic">MQTT base topic</label>
+                <input type="text" name="mqtt_base_topic" value="%MQTT_BASE_TOPIC%">
+            </div>
+        </fieldset>
+        <div class="pure-controls"><button type="submit" class="pure-button pure-button-primary">Submit</button></div>
+    </form>
+</body>
+
+</html>
