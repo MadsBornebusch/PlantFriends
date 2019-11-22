@@ -513,10 +513,10 @@ void setup() {
         }
 
         // Read the values
-        uint8_t sleep_time = sleep_time_variant.as<uint8_t>();
-        uint16_t watering_delay = watering_delay_variant.as<uint16_t>();
-        uint16_t watering_threshold = watering_threshold_variant.as<uint16_t>();
-        uint8_t watering_time = watering_time_variant.as<uint8_t>();
+        auto sleep_time = sleep_time_variant.as<decltype(eeprom_config_t::sleep_time)>();
+        auto watering_delay = watering_delay_variant.as<decltype(eeprom_config_t::watering_delay)>();
+        auto watering_threshold = watering_threshold_variant.as<decltype(eeprom_config_t::watering_threshold)>();
+        auto watering_time = watering_time_variant.as<decltype(eeprom_config_t::watering_time)>();
 
         // Use x bytes of ESP8266 flash for "EEPROM" emulation
         // This loads x bytes from the flash into a array stored in RAM
