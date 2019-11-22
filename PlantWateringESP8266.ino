@@ -250,18 +250,23 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
     else
       Serial.println(F("Failed to start DNS server"));
 
-    if (SPIFFS.begin()) {
-      httpServer.on("/pure-min.css", HTTP_GET, [](AsyncWebServerRequest *request) {
-        // Use Pure to style the from: https://purecss.io/forms/
-        request->send(SPIFFS, "/pure-min.css", "text/css");
-      });
-      httpServer.on("/pure-extra-min.css", HTTP_GET, [](AsyncWebServerRequest *request) {
-        // Som additional css to make it look a little nicer
-        request->send(SPIFFS, "/pure-extra-min.css", "text/css");
-      });
-    } else
-      Serial.println("An Error has occurred while mounting SPIFFS");
+    if (!SPIFFS.begin()) {
+      Serial.println(F("An Error has occurred while mounting SPIFFS! Rebooting..."));
+      delay(5000);
+      ESP.restart();
+    }
 
+    // Add routes for the different files and pages
+    httpServer.on("/pure-min.css", HTTP_GET, [](AsyncWebServerRequest *request) {
+      // Use Pure to style the from: https://purecss.io/forms/
+      request->send(SPIFFS, "/pure-min.css", "text/css");
+    });
+    httpServer.on("/pure-extra-min.css", HTTP_GET, [](AsyncWebServerRequest *request) {
+      // Som additional css to make it look a little nicer
+      request->send(SPIFFS, "/pure-extra-min.css", "text/css");
+    });
+
+    // This is the main page with the form for configuring the device
     httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
       auto processor = [](const String &var) {
         if (var == "WIFI_SSID")
