@@ -37,7 +37,11 @@ The WiFi, ThingSpeak and MQTT settings can be configured via a web interface:
 
 At first boot the module will turn on a hotspot with the SSID: `PlantWateringESP8266` and password: `plantsarecool`.
 
-After logging on to the WiFI simply navigate to `192.168.4.1` to configure the module.
+After logging on to the WiFI simply navigate to <http://plantwateringesp8266.local> or <http://192.168.4.1> to configure the module.
+
+The device can be put back into hotspot mode by shorting the TX and RX pins and restarting the module.
+
+A new firmware and file system image can be uploaded by navigation to <http://plantwateringesp8266.local/update> or <http://192.168.4.1/update>.
 
 # Home Assistant
 

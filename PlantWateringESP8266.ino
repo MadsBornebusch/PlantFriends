@@ -1,8 +1,8 @@
 #include <ArduinoJson.h>
 #include <AsyncMqttClient.h>
-#include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <EEPROM.h>
+#include <ESP8266mDNS.h>
 #include <ESP8266WiFi.h>
 
 #include "AsyncElegantOtaSpiffs.h"
@@ -100,7 +100,6 @@ const char* thingspeak_resource = "/update?api_key=";
 
 // Used for the AP (Access Point) - will be turned on at first boot
 static AsyncWebServer httpServer(80);
-static DNSServer dnsServer;
 
 // Timer used for measuring the time it takes for the voltage to rise over the capacitive sensor
 static volatile uint32_t soil_timer;
@@ -243,13 +242,14 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
       delay(5000);
       ESP.restart();
     }
+
+    WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
     IPAddress ip = WiFi.softAPIP();
     Serial.print(F("AP IP address: ")); Serial.println(ip);
 
-    if (dnsServer.start(53, "*", ip)) // Redirect all requests to the our IP address
-      Serial.println(F("DNS server started"));
-    else
-      Serial.println(F("Failed to start DNS server"));
+    MDNS.begin(F("plantwateringesp8266"));
+    MDNS.addService(F("http"), F("tcp"), 80);
+    Serial.println(F("Hostname: http://plantwateringesp8266.local"));
 
     if (!SPIFFS.begin()) {
       Serial.println(F("An Error has occurred while mounting SPIFFS! Rebooting..."));
@@ -395,12 +395,13 @@ void setup() {
 
     // Indicate to the user that the access point is on
     pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
 
     // Wait for the values to be configured
     while (eeprom_config.magic_number != MAGIC_NUMBER) {
-      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
       AsyncElegantOtaSpiffs.loop(); // This will restart the ESP if a new binary is uploaded
-      delay(100);
+      MDNS.update();
+      yield();
     }
 
     printEEPROMConfig(eeprom_config);
@@ -417,6 +418,7 @@ void setup() {
 
     Serial.println(F("Rebooting..."));
     httpServer.end();
+    MDNS.end();
     WiFi.softAPdisconnect(true);
     ESP.reset();
   } else
