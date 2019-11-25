@@ -262,9 +262,9 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
       // Use Pure to style the from: https://purecss.io/forms/
       request->send(SPIFFS, "/pure-min.css", "text/css");
     });
-    httpServer.on("/pure-extra-min.css", HTTP_GET, [](AsyncWebServerRequest *request) {
+    httpServer.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
       // Som additional css to make it look a little nicer
-      request->send(SPIFFS, "/pure-extra-min.css", "text/css");
+      request->send(SPIFFS, "/style.css", "text/css");
     });
 
     // This is the main page with the form for configuring the device
