@@ -5,6 +5,7 @@
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
 
+#include "AsyncElegantOtaSpiffs.h"
 #include "secret.h"
 
 // Define the access point SSID and password
@@ -389,6 +390,7 @@ void setup() {
   Serial.flush();
 
   if (eeprom_config.magic_number != MAGIC_NUMBER) {
+    AsyncElegantOtaSpiffs.begin(&httpServer); // Start ElegantOTA
     startAsyncHotspot(&eeprom_config);
 
     // Indicate to the user that the access point is on
@@ -397,6 +399,7 @@ void setup() {
     // Wait for the values to be configured
     while (eeprom_config.magic_number != MAGIC_NUMBER) {
       digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+      AsyncElegantOtaSpiffs.loop(); // This will restart the ESP if a new binary is uploaded
       delay(100);
     }
 
