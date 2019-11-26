@@ -234,118 +234,118 @@ static bool mqttPublishBlocking(String topic, const char *buffer, size_t length,
 }
 
 static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
-    // Configure the hotspot
-    // Note that we set the maximum number of connection to 1
-    int channel = 1, ssid_hidden = 0, max_connection = 1;
-    if (!WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD, channel, ssid_hidden, max_connection)) {
-      Serial.println(F("Failed to start hotspot! Rebooting..."));
-      delay(5000);
-      ESP.restart();
+  // Configure the hotspot
+  // Note that we set the maximum number of connection to 1
+  int channel = 1, ssid_hidden = 0, max_connection = 1;
+  if (!WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD, channel, ssid_hidden, max_connection)) {
+    Serial.println(F("Failed to start hotspot! Rebooting..."));
+    delay(5000);
+    ESP.restart();
+  }
+
+  WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
+  IPAddress ip = WiFi.softAPIP();
+  Serial.print(F("AP IP address: ")); Serial.println(ip);
+
+  MDNS.begin(F("plantwateringesp8266"));
+  MDNS.addService(F("http"), F("tcp"), 80);
+  Serial.println(F("Hostname: http://plantwateringesp8266.local"));
+
+  if (!SPIFFS.begin()) {
+    Serial.println(F("An Error has occurred while mounting SPIFFS! Rebooting..."));
+    delay(5000);
+    ESP.restart();
+  }
+
+  // Add routes for the different files and pages
+  httpServer.on("/pure-min.css", HTTP_GET, [](AsyncWebServerRequest *request) {
+    // Use Pure to style the from: https://purecss.io/forms/
+    request->send(SPIFFS, "/pure-min.css", "text/css");
+  });
+  httpServer.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
+    // Som additional css to make it look a little nicer
+    request->send(SPIFFS, "/style.css", "text/css");
+  });
+
+  // This is the main page with the form for configuring the device
+  httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    auto processor = [](const String &var) {
+      if (var == "WIFI_SSID")
+        return String(WIFI_SSID);
+      else if (var == "WIFI_PASSWORD")
+        return String(WIFI_PASSWORD);
+      else if (var == "THINGSPEAK_API_KEY")
+        return String(THINGSPEAK_API_KEY);
+      else if (var == "MQTT_HOST")
+        return String(MQTT_HOST);
+      else if (var == "MQTT_PORT")
+        return String(MQTT_PORT);
+      else if (var == "MQTT_USERNAME")
+        return String(MQTT_USERNAME);
+      else if (var == "MQTT_PASSWORD")
+        return String(MQTT_PASSWORD);
+      else if (var == "MQTT_BASE_TOPIC")
+        return String(MQTT_BASE_TOPIC);
+      return String();
+    };
+
+    // Send the index as a template
+    request->send(SPIFFS, "/index.html", String(), false, processor);
+  });
+
+  // Handle the post request
+  httpServer.on("/config", HTTP_POST, [&eeprom_config](AsyncWebServerRequest *request) {
+    if (!request->hasArg("wifi_ssid") || !request->hasArg("wifi_password")
+      || !request->hasArg("thingspeak_api_key")
+      || !request->hasArg("mqtt_host") || !request->hasArg("mqtt_port")
+      || !request->hasArg("mqtt_username") || !request->hasArg("mqtt_password") || !request->hasArg("mqtt_base_topic")) {
+      request->send(400, F("text/plain"), F("400: Invalid request"));
+      return;
     }
 
-    WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
-    IPAddress ip = WiFi.softAPIP();
-    Serial.print(F("AP IP address: ")); Serial.println(ip);
+    strncpy(eeprom_config->wifi_ssid, request->arg("wifi_ssid").c_str(), sizeof(eeprom_config->wifi_ssid) - 1);
+    eeprom_config->wifi_ssid[sizeof(eeprom_config->wifi_ssid) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    MDNS.begin(F("plantwateringesp8266"));
-    MDNS.addService(F("http"), F("tcp"), 80);
-    Serial.println(F("Hostname: http://plantwateringesp8266.local"));
+    strncpy(eeprom_config->wifi_password, request->arg("wifi_password").c_str(), sizeof(eeprom_config->wifi_password) - 1);
+    eeprom_config->wifi_password[sizeof(eeprom_config->wifi_password) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    if (!SPIFFS.begin()) {
-      Serial.println(F("An Error has occurred while mounting SPIFFS! Rebooting..."));
-      delay(5000);
-      ESP.restart();
-    }
+    strncpy(eeprom_config->thingspeak_api_key, request->arg("thingspeak_api_key").c_str(), sizeof(eeprom_config->thingspeak_api_key) - 1);
+    eeprom_config->thingspeak_api_key[sizeof(eeprom_config->thingspeak_api_key) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    // Add routes for the different files and pages
-    httpServer.on("/pure-min.css", HTTP_GET, [](AsyncWebServerRequest *request) {
-      // Use Pure to style the from: https://purecss.io/forms/
-      request->send(SPIFFS, "/pure-min.css", "text/css");
-    });
-    httpServer.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
-      // Som additional css to make it look a little nicer
-      request->send(SPIFFS, "/style.css", "text/css");
-    });
+    strncpy(eeprom_config->mqtt_host, request->arg("mqtt_host").c_str(), sizeof(eeprom_config->mqtt_host) - 1);
+    eeprom_config->mqtt_host[sizeof(eeprom_config->mqtt_host) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    // This is the main page with the form for configuring the device
-    httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-      auto processor = [](const String &var) {
-        if (var == "WIFI_SSID")
-          return String(WIFI_SSID);
-        else if (var == "WIFI_PASSWORD")
-          return String(WIFI_PASSWORD);
-        else if (var == "THINGSPEAK_API_KEY")
-          return String(THINGSPEAK_API_KEY);
-        else if (var == "MQTT_HOST")
-          return String(MQTT_HOST);
-        else if (var == "MQTT_PORT")
-          return String(MQTT_PORT);
-        else if (var == "MQTT_USERNAME")
-          return String(MQTT_USERNAME);
-        else if (var == "MQTT_PASSWORD")
-          return String(MQTT_PASSWORD);
-        else if (var == "MQTT_BASE_TOPIC")
-          return String(MQTT_BASE_TOPIC);
-        return String();
-      };
+    eeprom_config->mqtt_port = request->arg("mqtt_port").toInt();
 
-      // Send the index as a template
-      request->send(SPIFFS, "/index.html", String(), false, processor);
-    });
+    strncpy(eeprom_config->mqtt_username, request->arg("mqtt_username").c_str(), sizeof(eeprom_config->mqtt_username) - 1);
+    eeprom_config->mqtt_username[sizeof(eeprom_config->mqtt_username) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    // Handle the post request
-    httpServer.on("/config", HTTP_POST, [&eeprom_config](AsyncWebServerRequest *request) {
-      if (!request->hasArg("wifi_ssid") || !request->hasArg("wifi_password")
-        || !request->hasArg("thingspeak_api_key")
-        || !request->hasArg("mqtt_host") || !request->hasArg("mqtt_port")
-        || !request->hasArg("mqtt_username") || !request->hasArg("mqtt_password") || !request->hasArg("mqtt_base_topic")) {
-        request->send(400, F("text/plain"), F("400: Invalid request"));
-        return;
-      }
+    strncpy(eeprom_config->mqtt_password, request->arg("mqtt_password").c_str(), sizeof(eeprom_config->mqtt_password) - 1);
+    eeprom_config->mqtt_password[sizeof(eeprom_config->mqtt_password) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      strncpy(eeprom_config->wifi_ssid, request->arg("wifi_ssid").c_str(), sizeof(eeprom_config->wifi_ssid) - 1);
-      eeprom_config->wifi_ssid[sizeof(eeprom_config->wifi_ssid) - 1] = '\0'; // Make sure the buffer is null-terminated
+    strncpy(eeprom_config->mqtt_base_topic, request->arg("mqtt_base_topic").c_str(), sizeof(eeprom_config->mqtt_base_topic) - 1);
+    eeprom_config->mqtt_base_topic[sizeof(eeprom_config->mqtt_base_topic) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-      strncpy(eeprom_config->wifi_password, request->arg("wifi_password").c_str(), sizeof(eeprom_config->wifi_password) - 1);
-      eeprom_config->wifi_password[sizeof(eeprom_config->wifi_password) - 1] = '\0'; // Make sure the buffer is null-terminated
+    // Set the default settings
+    eeprom_config->sleep_time = DEFAULT_SLEEP_TIME;
+    eeprom_config->watering_delay = DEFAULT_WATERING_DELAY;
+    eeprom_config->watering_threshold = DEFAULT_WATERING_THRESHOLD;
+    eeprom_config->watering_time = DEFAULT_WATERING_TIME;
 
-      strncpy(eeprom_config->thingspeak_api_key, request->arg("thingspeak_api_key").c_str(), sizeof(eeprom_config->thingspeak_api_key) - 1);
-      eeprom_config->thingspeak_api_key[sizeof(eeprom_config->thingspeak_api_key) - 1] = '\0'; // Make sure the buffer is null-terminated
+    // The values where succesfully configured
+    eeprom_config->magic_number = MAGIC_NUMBER;
 
-      strncpy(eeprom_config->mqtt_host, request->arg("mqtt_host").c_str(), sizeof(eeprom_config->mqtt_host) - 1);
-      eeprom_config->mqtt_host[sizeof(eeprom_config->mqtt_host) - 1] = '\0'; // Make sure the buffer is null-terminated
+    request->redirect(F("/")); // Redirect to the root
+  });
 
-      eeprom_config->mqtt_port = request->arg("mqtt_port").toInt();
+  httpServer.onNotFound([](AsyncWebServerRequest *request) {
+    request->send(404, F("text/plain"), F("404: Not Found"));
+  });
 
-      strncpy(eeprom_config->mqtt_username, request->arg("mqtt_username").c_str(), sizeof(eeprom_config->mqtt_username) - 1);
-      eeprom_config->mqtt_username[sizeof(eeprom_config->mqtt_username) - 1] = '\0'; // Make sure the buffer is null-terminated
+  // Start the async HTTP server
+  httpServer.begin();
 
-      strncpy(eeprom_config->mqtt_password, request->arg("mqtt_password").c_str(), sizeof(eeprom_config->mqtt_password) - 1);
-      eeprom_config->mqtt_password[sizeof(eeprom_config->mqtt_password) - 1] = '\0'; // Make sure the buffer is null-terminated
-
-      strncpy(eeprom_config->mqtt_base_topic, request->arg("mqtt_base_topic").c_str(), sizeof(eeprom_config->mqtt_base_topic) - 1);
-      eeprom_config->mqtt_base_topic[sizeof(eeprom_config->mqtt_base_topic) - 1] = '\0'; // Make sure the buffer is null-terminated
-
-      // Set the default settings
-      eeprom_config->sleep_time = DEFAULT_SLEEP_TIME;
-      eeprom_config->watering_delay = DEFAULT_WATERING_DELAY;
-      eeprom_config->watering_threshold = DEFAULT_WATERING_THRESHOLD;
-      eeprom_config->watering_time = DEFAULT_WATERING_TIME;
-
-      // The values where succesfully configured
-      eeprom_config->magic_number = MAGIC_NUMBER;
-
-      request->redirect(F("/")); // Redirect to the root
-    });
-
-    httpServer.onNotFound([](AsyncWebServerRequest *request) {
-      request->send(404, F("text/plain"), F("404: Not Found"));
-    });
-
-    // Start the async HTTP server
-    httpServer.begin();
-
-    Serial.println(F("HTTP server started"));
+  Serial.println(F("HTTP server started"));
 }
 
 static void printEEPROMConfig(const eeprom_config_t &eeprom_config) {
