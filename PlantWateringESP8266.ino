@@ -515,6 +515,7 @@ void setup() {
       Serial.printf("Unsubscribe acknowledged for packetId: %u\n", packetId);
     });
     mqttClient.onMessage([&config_topic](char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+      // TODO: We need to override the retained value when the user sets it via the web interface
       if (config_topic == topic) {
         StaticJsonDocument<JSON_OBJECT_SIZE(4)> jsonDoc; // Create a document with room for the four objects
         DeserializationError error = deserializeJson(jsonDoc, payload);
@@ -571,11 +572,11 @@ void setup() {
             // This does NOT make any changes to flash, all data is still in RAM
             EEPROM.put(0, eeprom_config);
           }
-
-          // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
-          EEPROM.end();
         } else
           Serial.println(F("Ignoring new MQTT config, as EEPROM has not been configured"));
+
+        // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
+        EEPROM.end();
       } else {
         Serial.print(F("Unknown MQTT message received - topic: "));
         Serial.printf("%s, QoS: %u, dup: %d, retain: %d, length: %u, index: %u, total: %u\n",
