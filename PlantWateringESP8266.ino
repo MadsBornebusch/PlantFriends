@@ -195,8 +195,15 @@ static void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_
   ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
 }
 
-static void ICACHE_RAM_ATTR interrupt_routine(){
-  soil_timer = ESP.getCycleCount();
+// Copy of ESP.getCycleCount(), but can safely be called inside an interrupt
+static inline ICACHE_RAM_ATTR uint32_t GetCycleCountIRQ() {
+  uint32_t ccount;
+  __asm__ __volatile__("esync; rsr %0,ccount":"=a" (ccount));
+  return ccount;
+}
+
+static void ICACHE_RAM_ATTR soilInterrupt() {
+  soil_timer = GetCycleCountIRQ();
   soil_timer_flag = true;
 }
 
@@ -209,7 +216,7 @@ static bool readSoil(int *soil_measurements, uint8_t n_meas) {
     Serial.print(i); Serial.print(": ");
     digitalWrite(SOIL_OUT, LOW);
     delay(10); // Wait for the voltage to drop
-    attachInterrupt(digitalPinToInterrupt(SOIL_IN), interrupt_routine, RISING);
+    attachInterrupt(digitalPinToInterrupt(SOIL_IN), soilInterrupt, RISING);
     soil_timer_flag = false; // Reset the flag used for telling when the interrupt has triggered
     uint32_t timer_start = ESP.getCycleCount(); // Reset the counter
     digitalWrite(SOIL_OUT, HIGH); // Now set the pin high and measure the rise time using the "SOIL_IN" pin
