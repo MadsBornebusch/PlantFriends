@@ -67,7 +67,7 @@ typedef struct {
   char mqtt_password[33];
   char mqtt_base_topic[33];
 
-  // Can be set via MQTT
+  // Can be set via MQTT and the web interface
   uint8_t sleep_time;
   uint16_t watering_delay;
   uint16_t watering_threshold;
@@ -286,6 +286,15 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
         return String(MQTT_PASSWORD);
       else if (var == "MQTT_BASE_TOPIC")
         return String(MQTT_BASE_TOPIC);
+      else if (var == "sleep_time")
+        return String(DEFAULT_SLEEP_TIME);
+      else if (var == "watering_delay")
+        return String(DEFAULT_WATERING_DELAY);
+      else if (var == "watering_threshold")
+        return String(DEFAULT_WATERING_THRESHOLD);
+      else if (var == "watering_time")
+        return String(DEFAULT_WATERING_TIME);
+
       return String();
     };
 
@@ -298,7 +307,9 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
     if (!request->hasArg("wifi_ssid") || !request->hasArg("wifi_password")
       || !request->hasArg("thingspeak_api_key")
       || !request->hasArg("mqtt_host") || !request->hasArg("mqtt_port")
-      || !request->hasArg("mqtt_username") || !request->hasArg("mqtt_password") || !request->hasArg("mqtt_base_topic")) {
+      || !request->hasArg("mqtt_username") || !request->hasArg("mqtt_password") || !request->hasArg("mqtt_base_topic")
+      || !request->hasArg("sleep_time") || !request->hasArg("watering_delay")
+      || !request->hasArg("watering_threshold") || !request->hasArg("watering_time")) {
       request->send(400, F("text/plain"), F("400: Invalid request"));
       return;
     }
@@ -326,11 +337,10 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
     strncpy(eeprom_config->mqtt_base_topic, request->arg("mqtt_base_topic").c_str(), sizeof(eeprom_config->mqtt_base_topic) - 1);
     eeprom_config->mqtt_base_topic[sizeof(eeprom_config->mqtt_base_topic) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    // Set the default settings
-    eeprom_config->sleep_time = DEFAULT_SLEEP_TIME;
-    eeprom_config->watering_delay = DEFAULT_WATERING_DELAY;
-    eeprom_config->watering_threshold = DEFAULT_WATERING_THRESHOLD;
-    eeprom_config->watering_time = DEFAULT_WATERING_TIME;
+    eeprom_config->sleep_time = request->arg("sleep_time").toInt();
+    eeprom_config->watering_delay = request->arg("watering_delay").toInt();
+    eeprom_config->watering_threshold = request->arg("watering_threshold").toInt();
+    eeprom_config->watering_time = request->arg("watering_time").toInt();
 
     // The values where succesfully configured
     eeprom_config->magic_number = MAGIC_NUMBER;
