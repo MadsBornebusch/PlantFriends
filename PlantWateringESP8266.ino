@@ -104,7 +104,8 @@ const char* thingspeak_resource = "/update?api_key=";
 // Used for the AP (Access Point) - will be turned on at first boot
 static AsyncWebServer httpServer(80);
 
-// Timer used for measuring the time it takes for the voltage to rise over the capacitive sensor
+// Flag and timer used for measuring the time it takes for the voltage to rise over the capacitive sensor
+static volatile bool soil_timer_flag;
 static volatile uint32_t soil_timer;
 
 // Used to check if a MQTT package was succesfully sent
@@ -194,26 +195,39 @@ static void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_
   ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
 }
 
-static void readSoil(int *soil_measurements, uint8_t n_meas) {
+static void ICACHE_RAM_ATTR interrupt_routine(){
+  soil_timer = ESP.getCycleCount();
+  soil_timer_flag = true;
+}
+
+static bool readSoil(int *soil_measurements, uint8_t n_meas) {
   pinMode(SOIL_OUT, OUTPUT);
   pinMode(SOIL_IN, INPUT);
 
-  int current_val;
+  bool result = true;
   for (uint8_t i = 0; i < n_meas; i++) {
     Serial.print(i); Serial.print(": ");
     digitalWrite(SOIL_OUT, LOW);
-    delay(10);
-    attachInterrupt(digitalPinToInterrupt(SOIL_IN), interrupt_routine, CHANGE);
-    uint32_t timer_start = ESP.getCycleCount();
-    digitalWrite(SOIL_OUT, HIGH);
-    delay(1000);
+    delay(10); // Wait for the voltage to drop
+    attachInterrupt(digitalPinToInterrupt(SOIL_IN), interrupt_routine, RISING);
+    soil_timer_flag = false; // Reset the flag used for telling when the interrupt has triggered
+    uint32_t timer_start = ESP.getCycleCount(); // Reset the counter
+    digitalWrite(SOIL_OUT, HIGH); // Now set the pin high and measure the rise time using the "SOIL_IN" pin
+    int timeout = 1 * 100; // 1 second(s)
+    while (!soil_timer_flag && (timeout-- > 0))
+      delay(10);
     detachInterrupt(digitalPinToInterrupt(SOIL_IN));
-    current_val = (soil_timer - timer_start);
-    Serial.println(current_val);
-    soil_measurements[i] = current_val;
+    if (timeout == 0) {  // It took more than x seconds for the voltage to rise
+      result = false;
+      break;
+    } else {
+      soil_measurements[i] = soil_timer - timer_start;
+      Serial.println(soil_measurements[i]);
+    }
   }
 
   pinMode(SOIL_OUT, INPUT); // Save power
+  return result;
 }
 
 static void blinkLED() {
@@ -459,7 +473,11 @@ void setup() {
 
   // Read soil moisture
   int soil_measurements[N_SOIL_MEAS];
-  readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+  if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
+    Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
+    delay(5000);
+    ESP.restart();
+  }
   Serial.println(F("Read soil moisture"));
   int soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
   Serial.println(F("Calculated mean soil moisture"));
@@ -739,8 +757,4 @@ void setup() {
 void loop() {
   Serial.println(F("Somewhere we took a wrong turn and ended up in the main loop..."));
   ESP.restart();
-}
-
-void ICACHE_RAM_ATTR interrupt_routine(){
-  soil_timer = ESP.getCycleCount();
 }
