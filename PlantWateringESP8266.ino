@@ -74,6 +74,7 @@ typedef struct {
   uint16_t watering_delay;
   uint16_t watering_threshold;
   uint8_t watering_time;
+  bool override_retained_config_topic; // Used to override the retained config topic, so the values set via the web interface does not get overriden
 } eeprom_config_t;
 
 typedef struct {
@@ -346,6 +347,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     eeprom_config->watering_threshold = request->arg("watering_threshold").toInt();
     eeprom_config->watering_time = request->arg("watering_time").toInt();
 
+    eeprom_config->override_retained_config_topic = true; // Make sure the config topic gets overriden on the next boot
+
     // The values where succesfully configured
     eeprom_config->magic_number = MAGIC_NUMBER;
 
@@ -439,9 +442,6 @@ void setup() {
   } else
     Serial.println(F("Read configuration values from EEPROM"));
 
-  // Stop the EEPROM emulation
-  EEPROM.end();
-
   printEEPROMConfig(&eeprom_config);
 
   // Make sure Wifi is off
@@ -495,15 +495,12 @@ void setup() {
 
   if (strlen(eeprom_config.mqtt_base_topic) > 0) {
     // Topic used to configuring the device over MQTT
-    const String config_topic = "plant/" + String(eeprom_config.mqtt_base_topic) + "/config";
+    const String config_topic = String(F("plant/")) + eeprom_config.mqtt_base_topic + F("/config");
 
     // Connect to the MQTT broker
-    mqttClient.onConnect([&config_topic](bool sessionPresent) {
+    mqttClient.onConnect([](bool sessionPresent) {
       Serial.println(F("Connected to MQTT"));
       //Serial.printf("Session present: %d\n", sessionPresent);
-
-      uint16_t packetIdSub = mqttClient.subscribe(config_topic.c_str(), 0);
-      Serial.printf("Subscribing to topic \"%s\", QoS 0, packetId: %u\n", config_topic.c_str(), packetIdSub);
     });
     mqttClient.onDisconnect([](AsyncMqttClientDisconnectReason reason) {
       Serial.printf("Disconnected from MQTT: %d\n", reason);
@@ -514,8 +511,7 @@ void setup() {
     mqttClient.onUnsubscribe([](uint16_t packetId) {
       Serial.printf("Unsubscribe acknowledged for packetId: %u\n", packetId);
     });
-    mqttClient.onMessage([&config_topic](char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
-      // TODO: We need to override the retained value when the user sets it via the web interface
+    mqttClient.onMessage([&config_topic, &eeprom_config](char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
       if (config_topic == topic) {
         StaticJsonDocument<JSON_OBJECT_SIZE(4)> jsonDoc; // Create a document with room for the four objects
         DeserializationError error = deserializeJson(jsonDoc, payload);
@@ -544,14 +540,6 @@ void setup() {
         auto watering_threshold = watering_threshold_variant.as<decltype(eeprom_config_t::watering_threshold)>();
         auto watering_time = watering_time_variant.as<decltype(eeprom_config_t::watering_time)>();
 
-        // Use x bytes of ESP8266 flash for "EEPROM" emulation
-        // This loads x bytes from the flash into a array stored in RAM
-        EEPROM.begin(sizeof(eeprom_config_t));
-
-        // Read the configuration from EEPROM and check if it is valid
-        eeprom_config_t eeprom_config;
-        EEPROM.get(0, eeprom_config);
-
         if (eeprom_config.magic_number == MAGIC_NUMBER) {
           bool changed = eeprom_config.sleep_time != sleep_time ||
             eeprom_config.watering_delay != watering_delay ||
@@ -574,9 +562,6 @@ void setup() {
           }
         } else
           Serial.println(F("Ignoring new MQTT config, as EEPROM has not been configured"));
-
-        // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
-        EEPROM.end();
       } else {
         Serial.print(F("Unknown MQTT message received - topic: "));
         Serial.printf("%s, QoS: %u, dup: %d, retain: %d, length: %u, index: %u, total: %u\n",
@@ -608,6 +593,27 @@ void setup() {
 #else
       uint64_t chip_id = ESP.getEfuseMac();
 #endif
+
+      // Override the retained config topic, so we do not use the old values after they have been changed via the web interface
+      if (eeprom_config.override_retained_config_topic) {
+        eeprom_config.override_retained_config_topic = false; // Will be writen to the EEPROM further down
+
+        jsonDoc.clear(); // Make sure we start with a blank document
+        jsonDoc["sleep_time"] = eeprom_config.sleep_time;
+        jsonDoc["watering_delay"] = eeprom_config.watering_delay;
+        jsonDoc["watering_threshold"] = eeprom_config.watering_threshold;
+        jsonDoc["watering_time"] = eeprom_config.watering_time;
+
+        size_t n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+        if (mqttPublishBlocking(config_topic, jsonBuffer, n, true, 5 * 10))
+          Serial.printf("Successfully overrode MQTT config topic: %s, length: %u\n", jsonBuffer, n);
+        else
+          Serial.println(F("Failed to override MQTT config topic"));
+      } else {
+        // Subscribe to the config topic, so the user can set the value via MQTT
+        uint16_t packetIdSub = mqttClient.subscribe(config_topic.c_str(), 0);
+        Serial.printf("Subscribed to topic \"%s\", QoS 0, packetId: %u\n", config_topic.c_str(), packetIdSub);
+      }
 
       // Send messsages, so the sensor is auto discovered by Home Assistant - see: https://www.home-assistant.io/docs/mqtt/discovery/
       jsonDoc.clear(); // Make sure we start with a blank document
@@ -716,6 +722,13 @@ void setup() {
           break;
   }
 */
+
+  // Replace values in RAM with the modified values
+  // This does NOT make any changes to flash, all data is still in RAM
+  EEPROM.put(0, eeprom_config);
+
+  // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
+  EEPROM.end();
 
   Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config.sleep_time); Serial.println(F(" min"));
 
