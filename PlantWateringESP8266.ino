@@ -235,7 +235,7 @@ static bool mqttPublishBlocking(String topic, const char *buffer, size_t length,
   return timeout > 0;
 }
 
-static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
+static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_config) {
   // Configure the hotspot
   // Note that we set the maximum number of connection to 1
   int channel = 1, ssid_hidden = 0, max_connection = 1;
@@ -259,6 +259,8 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
     ESP.restart();
   }
 
+  AsyncElegantOtaSpiffs.begin(&httpServer); // Start ElegantOTA
+
   // Add routes for the different files and pages
   httpServer.on("/pure-min.css", HTTP_GET, [](AsyncWebServerRequest *request) {
     // Use Pure to style the from: https://purecss.io/forms/
@@ -270,32 +272,32 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
   });
 
   // This is the main page with the form for configuring the device
-  httpServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    auto processor = [](const String &var) {
+  httpServer.on("/", HTTP_GET, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
+    auto processor = [&eeprom_config](const String &var) {
       if (var == "WIFI_SSID")
-        return String(WIFI_SSID);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->wifi_ssid : WIFI_SSID);
       else if (var == "WIFI_PASSWORD")
-        return String(WIFI_PASSWORD);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->wifi_password : WIFI_PASSWORD);
       else if (var == "THINGSPEAK_API_KEY")
-        return String(THINGSPEAK_API_KEY);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->thingspeak_api_key : THINGSPEAK_API_KEY);
       else if (var == "MQTT_HOST")
-        return String(MQTT_HOST);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_host : MQTT_HOST);
       else if (var == "MQTT_PORT")
-        return String(MQTT_PORT);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_port : MQTT_PORT);
       else if (var == "MQTT_USERNAME")
-        return String(MQTT_USERNAME);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_username : MQTT_USERNAME);
       else if (var == "MQTT_PASSWORD")
-        return String(MQTT_PASSWORD);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_password : MQTT_PASSWORD);
       else if (var == "MQTT_BASE_TOPIC")
-        return String(MQTT_BASE_TOPIC);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_base_topic : MQTT_BASE_TOPIC);
       else if (var == "sleep_time")
-        return String(DEFAULT_SLEEP_TIME);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->sleep_time : DEFAULT_SLEEP_TIME);
       else if (var == "watering_delay")
-        return String(DEFAULT_WATERING_DELAY);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_delay : DEFAULT_WATERING_DELAY);
       else if (var == "watering_threshold")
-        return String(DEFAULT_WATERING_THRESHOLD);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_threshold : DEFAULT_WATERING_THRESHOLD);
       else if (var == "watering_time")
-        return String(DEFAULT_WATERING_TIME);
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_time : DEFAULT_WATERING_TIME);
 
       return String();
     };
@@ -305,7 +307,7 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
   });
 
   // Handle the post request
-  httpServer.on("/config", HTTP_POST, [&eeprom_config](AsyncWebServerRequest *request) {
+  httpServer.on("/config", HTTP_POST, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
     if (!request->hasArg("wifi_ssid") || !request->hasArg("wifi_password")
       || !request->hasArg("thingspeak_api_key")
       || !request->hasArg("mqtt_host") || !request->hasArg("mqtt_port")
@@ -348,6 +350,8 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
     eeprom_config->magic_number = MAGIC_NUMBER;
 
     request->redirect(F("/")); // Redirect to the root
+
+    *p_run_hotspot = false; // Stop the hotspot when the user submits new values
   });
 
   httpServer.onNotFound([](AsyncWebServerRequest *request) {
@@ -358,28 +362,49 @@ static void startAsyncHotspot(eeprom_config_t *eeprom_config) {
   httpServer.begin();
 
   Serial.println(F("HTTP server started"));
+
+  // Indicate to the user that the access point is on
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
+  // Wait for the values to be configured
+  while (*p_run_hotspot || eeprom_config->magic_number != MAGIC_NUMBER) {
+    AsyncElegantOtaSpiffs.loop(); // This will restart the ESP if a new binary is uploaded
+    MDNS.update();
+    yield();
+  }
+
+  printEEPROMConfig(eeprom_config);
+
+  // Replace values in RAM with the modified values
+  // This does NOT make any changes to flash, all data is still in RAM
+  EEPROM.put(0, *eeprom_config);
+
+  // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
+  EEPROM.end();
+
+  // Give it some time to send the response
+  delay(1000);
+
+  Serial.println(F("Turning off hotspot. Rebooting..."));
+  httpServer.end();
+  MDNS.end();
+  WiFi.softAPdisconnect(true);
+  ESP.reset();
 }
 
-static void printEEPROMConfig(const eeprom_config_t &eeprom_config) {
+static void printEEPROMConfig(const eeprom_config_t *eeprom_config) {
     // The passwords and ThingSpeak API key are not printed for security reasons
-  Serial.printf("WiFi SSID: %s\n", eeprom_config.wifi_ssid);
+  Serial.printf("WiFi SSID: %s\n", eeprom_config->wifi_ssid);
   Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
-    eeprom_config.mqtt_host, eeprom_config.mqtt_port,
-    eeprom_config.mqtt_username, eeprom_config.mqtt_base_topic);
+    eeprom_config->mqtt_host, eeprom_config->mqtt_port,
+    eeprom_config->mqtt_username, eeprom_config->mqtt_base_topic);
   Serial.printf("Sleep time: %u, watering delay: %u, watering threshold: %u, watering time: %u\n",
-    eeprom_config.sleep_time, eeprom_config.watering_delay,
-    eeprom_config.watering_threshold, eeprom_config.watering_time);
+    eeprom_config->sleep_time, eeprom_config->watering_delay,
+    eeprom_config->watering_threshold, eeprom_config->watering_time);
 }
 
 void setup() {
-  // Use x bytes of ESP8266 flash for "EEPROM" emulation
-  // This loads x bytes from the flash into a array stored in RAM
-  EEPROM.begin(sizeof(eeprom_config_t));
-
-  // Read the configuration from EEPROM and check if it is valid
-  eeprom_config_t eeprom_config;
-  EEPROM.get(0, eeprom_config);
-
   // Detect if we should go into AP mode by turning on the pull-up resistor on the TX pin
   // then set the RX pin low and read the TX pin
   pinMode(TX_PIN, INPUT_PULLUP);
@@ -387,9 +412,7 @@ void setup() {
   digitalWrite(RX_PIN, LOW);
 
   // If the pin is now low, then it means that RX and TX are shorted together
-  // Simply reset the magic number, so it goes into AP mode
-  if (!digitalRead(TX_PIN))
-    eeprom_config.magic_number = 0;
+  bool run_hotspot = !digitalRead(TX_PIN);
 
   // Save power
   pinMode(TX_PIN, INPUT);
@@ -401,45 +424,25 @@ void setup() {
   Serial.println(F("\nBooting"));
   Serial.flush();
 
-  if (eeprom_config.magic_number != MAGIC_NUMBER) {
-    AsyncElegantOtaSpiffs.begin(&httpServer); // Start ElegantOTA
-    startAsyncHotspot(&eeprom_config);
+  // Use x bytes of ESP8266 flash for "EEPROM" emulation
+  // This loads x bytes from the flash into a array stored in RAM
+  EEPROM.begin(sizeof(eeprom_config_t));
 
-    // Indicate to the user that the access point is on
-    pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, LOW);
+  // Read the configuration from EEPROM and check if it is valid
+  eeprom_config_t eeprom_config;
+  EEPROM.get(0, eeprom_config);
 
-    // Wait for the values to be configured
-    while (eeprom_config.magic_number != MAGIC_NUMBER) {
-      AsyncElegantOtaSpiffs.loop(); // This will restart the ESP if a new binary is uploaded
-      MDNS.update();
-      yield();
-    }
-
-    printEEPROMConfig(eeprom_config);
-
-    // Replace values in RAM with the modified values
-    // This does NOT make any changes to flash, all data is still in RAM
-    EEPROM.put(0, eeprom_config);
-
-    // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
-    EEPROM.end();
-
-    // Give it some time to send the response
-    delay(1000);
-
-    Serial.println(F("Rebooting..."));
-    httpServer.end();
-    MDNS.end();
-    WiFi.softAPdisconnect(true);
-    ESP.reset();
+  if (run_hotspot || eeprom_config.magic_number != MAGIC_NUMBER) {
+    if (eeprom_config.magic_number != MAGIC_NUMBER)
+      Serial.println(F("Starting hotspot, as the device has not been configured"));
+    startAsyncHotspot(&run_hotspot, &eeprom_config); // This will block and restart the ESP
   } else
     Serial.println(F("Read configuration values from EEPROM"));
 
   // Stop the EEPROM emulation
   EEPROM.end();
 
-  printEEPROMConfig(eeprom_config);
+  printEEPROMConfig(&eeprom_config);
 
   // Make sure Wifi is off
   WiFi.mode(WIFI_OFF);
@@ -562,7 +565,7 @@ void setup() {
             eeprom_config.watering_time = watering_time;
 
             Serial.println(F("Received new MQTT config"));
-            printEEPROMConfig(eeprom_config);
+            printEEPROMConfig(&eeprom_config);
 
             // Replace values in RAM with the modified values
             // This does NOT make any changes to flash, all data is still in RAM
