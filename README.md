@@ -76,7 +76,7 @@ sensor:
 - [ ] OTA update via Github release - enable/disable using checkbox
 - [ ] Send via MQTT when it watered the plant
 - [ ] Verify checksum of flashed binary
-- [ ] [Support Home Assistant discovery](https://www.home-assistant.io/docs/mqtt/discovery/)
+- [x] [Support Home Assistant discovery](https://www.home-assistant.io/docs/mqtt/discovery/)
 - [x] Make a struct for variables to save in RTC memory
 - [ ] Only check for OTA update once per day (24 hr)
 - [ ] [Use SPIFFS file system to store configuration file (soil moisture etc)](https://arduino-esp8266.readthedocs.io/en/latest/filesystem.html)

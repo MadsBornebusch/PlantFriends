@@ -8,6 +8,8 @@
 #include "AsyncElegantOtaSpiffs.h"
 #include "secret.h"
 
+#define SW_VERSION  "1.0.0"
+
 // Define the access point SSID and password
 #define WIFI_AP_SSID "PlantWateringESP8266"
 #define WIFI_AP_PASSWORD "plantsarecool"
@@ -225,9 +227,9 @@ static void onMqttPublish(uint16_t packetId) {
   //Serial.printf("Publish acknowledged - packet ID: %u\n", packetId);
 }
 
-static bool mqttPublishBlocking(String topic, const char *buffer, size_t length, int timeout) {
+static bool mqttPublishBlocking(String topic, const char *buffer, size_t length, bool retain, int timeout) {
   publishedPacketId = -1;
-  uint16_t packetId = mqttClient.publish(topic.c_str(), 2, false, buffer, length);
+  uint16_t packetId = mqttClient.publish(topic.c_str(), 2, retain, buffer, length);
   while (publishedPacketId != packetId && (timeout-- > 0))
     delay(100);
   return timeout > 0;
@@ -588,7 +590,66 @@ void setup() {
 
     // Publish the data via MQTT
     if (mqttClient.connected()) {
-      StaticJsonDocument<JSON_OBJECT_SIZE(6)> jsonDoc; // Create a document with room for the two objects
+      DynamicJsonDocument jsonDoc(1024); // Create a JSON document - you need to allocate more memory if you change the code below
+      char jsonBuffer[350]; // Buffer used for storing the payload
+
+      // Capitilize the first character
+      String first_char = String(eeprom_config.mqtt_base_topic).substring(0, 1);
+      first_char.toUpperCase();
+      String name = first_char + String(eeprom_config.mqtt_base_topic).substring(1);
+
+      // Used for the unique device identifier(s)
+#ifdef ESP8266
+      uint32_t chip_id = ESP.getChipId();
+#else
+      uint64_t chip_id = ESP.getEfuseMac();
+#endif
+
+      // Send messsages, so the sensor is auto discovered by Home Assistant - see: https://www.home-assistant.io/docs/mqtt/discovery/
+      jsonDoc.clear(); // Make sure we start with a blank document
+      jsonDoc["name"] = name + F(" Soil Moisture");
+      jsonDoc["~"] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+      jsonDoc["stat_t"] = F("~/state");
+      jsonDoc["val_tpl"] = F("{{value_json.soil_moisture}}");
+      jsonDoc["unit_of_meas"] = F("clk");
+      jsonDoc["ic"] = F("mdi:sprout");
+      jsonDoc["frc_upd"] = true; // Make sure that the sensor value is always stored and not just when it changes
+      jsonDoc["uniq_id"] = String(chip_id) + F("_soil_moisture");
+
+      // Set device information used for the device registry
+      jsonDoc["device"]["name"] = name + F(" Plant");
+      jsonDoc["device"]["sw"] = SW_VERSION;
+      jsonDoc["device"].createNestedArray("ids").add(String(chip_id));
+
+      size_t n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+      if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("S/config"), jsonBuffer, n, true, 5 * 10))
+        Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
+      else
+        Serial.println(F("Failed to send soil moisture discovery message due to timeout"));
+
+      // Send the voltage "sensor" as well
+      jsonDoc.clear(); // Make sure we start with a blank document
+      jsonDoc["name"] = name + F(" Voltage");
+      jsonDoc["~"] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+      jsonDoc["stat_t"] = F("~/state");
+      jsonDoc["val_tpl"] = F("{{value_json.voltage}}");
+      jsonDoc["unit_of_meas"] = F("V");
+      jsonDoc["ic"] = F("mdi:solar-panel-large");
+      jsonDoc["frc_upd"] = true; // Make sure that the sensor value is always stored and not just when it changes
+      jsonDoc["uniq_id"] = String(chip_id) + F("_voltage");
+
+      // Set device information used for the device registry
+      jsonDoc["device"]["name"] = name + F(" Plant");
+      jsonDoc["device"]["sw"] = SW_VERSION;
+      jsonDoc["device"].createNestedArray("ids").add(String(chip_id));
+
+      n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+      if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("V/config"), jsonBuffer, n, true, 5 * 10))
+        Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
+      else
+        Serial.println(F("Failed to send voltage discovery message due to timeout"));
+
+      jsonDoc.clear(); // Make sure we start with a blank document
       jsonDoc["soil_moisture"] = soil_moisture;
       jsonDoc["voltage"] = voltage / 1000.0f;
       jsonDoc["sleep_time"] = eeprom_config.sleep_time;
@@ -596,12 +657,11 @@ void setup() {
       jsonDoc["watering_threshold"] = eeprom_config.watering_threshold;
       jsonDoc["watering_time"] = eeprom_config.watering_time;
 
-      char buffer[150];
-      size_t n = serializeJson(jsonDoc, buffer);
-      if (mqttPublishBlocking("plant/" + String(eeprom_config.mqtt_base_topic) + "/state", buffer, n, 5 * 10))
-        Serial.printf("Successfully sent MQTT message: %s, length: %u\n", buffer, n);
+      n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+      if (mqttPublishBlocking(String(F("plant/")) + String(eeprom_config.mqtt_base_topic) + F("/state"), jsonBuffer, n, false, 5 * 10))
+        Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
       else
-        Serial.print(F("Failed to send MQTT message due to timeout"));
+        Serial.println(F("Failed to send MQTT message due to timeout"));
     } else
       Serial.println(F("Failed to connect to MQTT broker"));
 
