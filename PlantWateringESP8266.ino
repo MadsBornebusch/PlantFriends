@@ -448,6 +448,11 @@ void setup() {
   Serial.println(F("\nBooting"));
   Serial.flush();
 
+  // Make sure Wifi is off
+  // This is needed before trying to turn on the access point, as the ESP8266 can not have both on at the same time
+  // See: https://github.com/esp8266/Arduino/issues/1094
+  WiFi.mode(WIFI_OFF);
+
   // Use x bytes of ESP8266 flash for "EEPROM" emulation
   // This loads x bytes from the flash into a array stored in RAM
   EEPROM.begin(sizeof(eeprom_config_t));
@@ -464,9 +469,6 @@ void setup() {
     Serial.println(F("Read configuration values from EEPROM"));
 
   printEEPROMConfig(&eeprom_config);
-
-  // Make sure Wifi is off
-  WiFi.mode(WIFI_OFF);
 
   // Handle long sleep
   sleep_data_t sleep_data;
