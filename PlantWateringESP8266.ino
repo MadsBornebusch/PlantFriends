@@ -655,6 +655,7 @@ void setup() {
       jsonDoc["name"] = name + F(" Soil Moisture");
       jsonDoc["~"] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
       jsonDoc["stat_t"] = F("~/state");
+      jsonDoc["json_attr_t"] = F("~/state");
       jsonDoc["val_tpl"] = F("{{value_json.soil_moisture}}");
       jsonDoc["unit_of_meas"] = F("clk");
       jsonDoc["ic"] = F("mdi:sprout");
@@ -677,6 +678,7 @@ void setup() {
       jsonDoc["name"] = name + F(" Voltage");
       jsonDoc["~"] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
       jsonDoc["stat_t"] = F("~/state");
+      jsonDoc["json_attr_t"] = F("~/state");
       jsonDoc["val_tpl"] = F("{{value_json.voltage}}");
       jsonDoc["unit_of_meas"] = F("V");
       jsonDoc["ic"] = F("mdi:solar-panel-large");
@@ -703,6 +705,7 @@ void setup() {
       jsonDoc["watering_time"] = eeprom_config.watering_time;
       jsonDoc["sleep_num"] = sleep_data.sleep_num;
       jsonDoc["watering_delay_cycles"] = sleep_data.watering_delay_cycles;
+      jsonDoc["version"] = SW_VERSION;
 
       n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
       if (mqttPublishBlocking(String(F("plant/")) + String(eeprom_config.mqtt_base_topic) + F("/state"), jsonBuffer, n, false, 5 * 10))
