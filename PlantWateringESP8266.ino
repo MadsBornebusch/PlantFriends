@@ -701,6 +701,8 @@ void setup() {
       jsonDoc["watering_delay"] = eeprom_config.watering_delay;
       jsonDoc["watering_threshold"] = eeprom_config.watering_threshold;
       jsonDoc["watering_time"] = eeprom_config.watering_time;
+      jsonDoc["sleep_num"] = sleep_data.sleep_num;
+      jsonDoc["watering_delay_cycles"] = sleep_data.watering_delay_cycles;
 
       n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
       if (mqttPublishBlocking(String(F("plant/")) + String(eeprom_config.mqtt_base_topic) + F("/state"), jsonBuffer, n, false, 5 * 10))
