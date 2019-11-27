@@ -32,10 +32,12 @@
 
 // Sleep interval can safely be set from 1 to 30 minutes (possibly higher, but there is a limitation to sleep time with the esp8266). Should be smaller or equal to SLEEP_TIME
 #define SLEEP_INTERVAL (10U)
+
 // Calculate sleep interval and number of sleeps
 #define SLEEP_INTERVAL_US (SLEEP_INTERVAL * 60UL * 1000000UL)
-// RTC memory address to use for sleep counter - note that the first 128 bytes are used by the OTA, so we set it to 256 to be safe
-#define SLEEP_DATA_ADDR (256U)
+
+// RTC memory address to use for sleep counter - note that the first 128 bytes are used by the OTA and the offset is set in block of 4 bytes, so we set the value to 128/4=32, so OTA still works
+#define SLEEP_DATA_ADDR (32U)
 
 // Define whether to post to Thingspeak
 #define POST_TO_THINGSPEAK
@@ -165,7 +167,9 @@ static void handleLongSleep(sleep_data_t *sleep_data) {
     ESP.restart();
   }
 
-  ESP.rtcUserMemoryRead(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t));
+  if (!ESP.rtcUserMemoryRead(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t)))
+    Serial.println(F("Failed to read RTC user memory"));
+
   if (sleep_data->magic_number != MAGIC_NUMBER) {
     Serial.println(F("Failed to read sleep data from the RTC memory"));
     sleep_data->magic_number = MAGIC_NUMBER;
@@ -173,10 +177,14 @@ static void handleLongSleep(sleep_data_t *sleep_data) {
     sleep_data->watering_delay_cycles = 1;
   }
 
+  Serial.print(F("Sleep number: ")); Serial.print(sleep_data->sleep_num);
+  Serial.print(F(", watering delay cycles: ")); Serial.println(sleep_data->watering_delay_cycles);
+
   // Check if we should go back to sleep immediately
   if (--sleep_data->sleep_num != 0) {
-    Serial.print("Going to sleep again. Times left to sleep: "); Serial.println(sleep_data->sleep_num);
-    ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t));
+    Serial.print(F("Going to sleep again. Times left to sleep: ")); Serial.println(sleep_data->sleep_num);
+    if (!ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t)))
+      Serial.println(F("Failed to write RTC user memory"));
     ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
   }
 }
@@ -190,8 +198,9 @@ static void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_
 
   sleep_data->magic_number = MAGIC_NUMBER;
   sleep_data->sleep_num = eeprom_config->sleep_time / SLEEP_INTERVAL; // Set the number of times it should wakeup and go back to sleep again immediately
-  Serial.print("Number of sleep intervals: "); Serial.println(sleep_data->sleep_num);
-  ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t));
+  Serial.print(F("Number of sleeps left: ")); Serial.println(sleep_data->sleep_num);
+  if (!ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t)))
+    Serial.println(F("Failed to write RTC user memory"));
   ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
 }
 
@@ -495,7 +504,6 @@ void setup() {
   //Serial.print("Filtered soil moisture: "); Serial.println(soil_moisture_filtered);
 
   // Water plant
-  Serial.print(F("Watering delay: ")); Serial.println(sleep_data.watering_delay_cycles);
   if(soil_moisture <= eeprom_config.watering_threshold && sleep_data.watering_delay_cycles <= 1){
     Serial.println(F("Watering plant!!"));
     pinMode(WATERING_OUT, OUTPUT);
@@ -511,7 +519,7 @@ void setup() {
   // Connect to Wifi
   WiFi.mode(WIFI_STA);
   WiFi.begin(eeprom_config.wifi_ssid, eeprom_config.wifi_password);
-  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+  if (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println(F("Connection Failed! Rebooting..."));
     delay(5000);
     ESP.restart();
