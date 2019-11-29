@@ -1,15 +1,19 @@
 # Plant watering ESP8266
+
+The code is licensed under the GNU General Public License Version 3.
+
+The PCB is licensed under the Creative Commons Attribution-ShareAlike 4.0 license due to using an [ESP8266 kicad library](https://github.com/jdunmire/kicad-ESP8266) and a particular [soil moisture probe design](https://github.com/acolomitchi/cap-soil-moisture-v2).
 _________
 
 [![](https://github.com/MadsBornebusch/PlantWateringESP8266/workflows/Plant%20Watering%20ESP8266%20CI/badge.svg)](https://github.com/MadsBornebusch/PlantWateringESP8266/actions?query=branch%3Amaster)
 
 This is a plant watering ESP8266.
 
-The code is licensed under the GNU GENERAL PUBLIC LICENSE Version 3 in the LICENSE file.
-
-The PCB is licensed under the Creative Commons Attribution-ShareAlike 4.0 license due to using an [ESP8266 kicad library](https://github.com/jdunmire/kicad-ESP8266) and a particular [soil moisture probe design](https://github.com/acolomitchi/cap-soil-moisture-v2).
+TODO: Add picture of a plant here
 
 # PCB
+
+TODO: Add picture of the PCB here
 
 ## Pinout when seen from component side:
 
