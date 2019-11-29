@@ -106,6 +106,9 @@ const char* thingspeak_resource = "/update?api_key=";
 // Used for the AP (Access Point) - will be turned on at first boot
 static AsyncWebServer httpServer(80);
 
+// Used for updating the firmware and file system via HTTP
+static AsyncElegantOtaSpiffs elegantUpdater(LED_PIN, LOW);
+
 // Flag and timer used for measuring the time it takes for the voltage to rise over the capacitive sensor
 static volatile bool soil_timer_flag;
 static volatile uint32_t soil_timer;
@@ -290,7 +293,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     ESP.restart();
   }
 
-  AsyncElegantOtaSpiffs.begin(&httpServer); // Start ElegantOTA
+  elegantUpdater.begin(&httpServer); // Start ElegantOTA
 
   // Add routes for the different files and pages
   httpServer.on("/pure-min.css", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -402,7 +405,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
 
   // Wait for the values to be configured
   while (*p_run_hotspot || eeprom_config->magic_number != MAGIC_NUMBER) {
-    AsyncElegantOtaSpiffs.loop(); // This will restart the ESP if a new binary is uploaded
+    elegantUpdater.loop(); // This will restart the ESP if a new binary is uploaded
     MDNS.update();
     yield();
   }

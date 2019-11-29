@@ -8,38 +8,41 @@
 
 #include <ESPAsyncWebServer.h>
 #include <elegantWebpage.h>
+#include <Updater.h>
 
 #ifndef U_SPIFFS
 // Needed for backwards compatibility: https://github.com/esp8266/Arduino/commit/a389a995fb12459819e33970ec80695f1eaecc58
 #define U_SPIFFS U_FS
 #endif
 
-class AsyncElegantOtaSpiffsClass {
+class AsyncElegantOtaSpiffs {
 public:
+    AsyncElegantOtaSpiffs(int ledPin = -1, uint8_t ledOn = LOW) : ledPin(ledPin), ledOn(ledOn) {};
+
     void begin(AsyncWebServer *server) {
         server->on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
-            AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", ELEGANT_HTML, ELEGANT_HTML_SIZE);
-            response->addHeader("Content-Encoding", "gzip");
+            AsyncWebServerResponse *response = request->beginResponse_P(200, F("text/html"), ELEGANT_HTML, ELEGANT_HTML_SIZE);
+            response->addHeader(F("Content-Encoding"), F("gzip"));
             request->send(response);
         });
 
         server->on("/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
             // the request handler is triggered after the upload has finished...
             // create the response, add header, and send response
-            AsyncWebServerResponse *response = request->beginResponse(Update.hasError() ? 500 : 200, "text/plain", Update.hasError() ? "FAIL" : "OK");
-            response->addHeader("Connection", "close");
-            response->addHeader("Access-Control-Allow-Origin", "*");
+            AsyncWebServerResponse *response = request->beginResponse(Update.hasError() ? 500 : 200, F("text/plain"), Update.hasError() ? F("FAIL") : F("OK"));
+            response->addHeader(F("Connection"), F("close"));
+            response->addHeader(F("Access-Control-Allow-Origin"), F("*"));
             request->send(response);
             restartRequired = true;
-        }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+        }, [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
             // Upload handler chunks in data
             if (!index) {
                 size_t content_len = request->contentLength();
-                int cmd = filename.indexOf("spiffs") > -1 ? U_SPIFFS : U_FLASH;
+                int cmd = filename.indexOf(F("spiffs")) > -1 ? U_SPIFFS : U_FLASH;
 #if defined(ESP8266)
                 Update.runAsync(true);
 #endif
-                if (!Update.begin(content_len, cmd))
+                if (!Update.begin(content_len, cmd, ledPin, ledOn))
                     Update.printError(Serial);
             }
 
@@ -47,9 +50,9 @@ public:
             if (Update.write(data, len) != len)
                 Update.printError(Serial);
 
-            if (final) { // if the final flag is set then this is the last frame of data
-                if (Update.end(true)) { // true to set the size to the current progress
-                }
+            if (final) { // If the final flag is set then this is the last frame of data
+                if (!Update.end(true)) // True to set the size to the current progress
+                    Update.printError(Serial);
             }
         });
     }
@@ -70,8 +73,8 @@ public:
 
 private:
     bool restartRequired = false;
+    int ledPin;
+    uint8_t ledOn;
 };
-
-AsyncElegantOtaSpiffsClass AsyncElegantOtaSpiffs;
 
 #endif // __AsyncElegantOTSpiff_h
