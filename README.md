@@ -35,6 +35,8 @@ The WiFi, ThingSpeak and MQTT settings can be configured via a web interface:
 
 ![](img/plant_settings.png)
 
+If you do not want to use ThingSpeak simply leave the `ThingSpeak API key` field empty. Similarly the MQTT can be disabled by leaving the `MQTT base topic` empty.
+
 At first boot the module will turn on a hotspot with the SSID: `PlantWateringESP8266` and password: `plantsarecool`.
 
 After logging on to the WiFI simply navigate to <http://plantwateringesp8266.local> or <http://192.168.4.1> to configure the module.
@@ -43,25 +45,131 @@ The device can be put back into hotspot mode by shorting the TX and RX pins and 
 
 A new firmware and file system image can be uploaded by navigation to <http://plantwateringesp8266.local/update> or <http://192.168.4.1/update>.
 
-# Home Assistant
+# [Home Assistant](https://www.home-assistant.io/)
 
-[Home Assistant](https://www.home-assistant.io/) example configuration:
+Simply activate [MQTT discovery](https://www.home-assistant.io/docs/mqtt/discovery/) by adding the following to your `configuration.yaml` file:
 
 ```yaml
-sensor:
-  - platform: mqtt
-    name: 'Soil moisture'
-    icon: mdi:sprout
-    unit_of_measurement: 'clk'
-    state_topic: 'avocado'
-    value_template: "{{ value_json.soil_moisture }}"
-  - platform: mqtt
-    name: 'Voltage'
-    icon: mdi:solar-panel-large
-    unit_of_measurement: 'V'
-    state_topic: 'avocado'
-    value_template: "{{ value_json.voltage }}"
+mqtt:
+  discovery: true
 ```
+
+Assuming your plant is named `office` it will now show up as a sensor like so:
+
+![](img/hass_sensor.png)
+
+The name of the plant is taken from the `MQTT base topic` and get be chaned via the [HTTP settings](#Settings) page.
+
+## Advanced Home Assistant configuration
+
+This section will guide you through on how to set the `sleep time`, `watering delay`, `watering threshold` and `watering time` directly via the Home Assitant overview page.
+
+First add the following to your `configuration.yaml` file:
+
+```yaml
+input_number:
+  office_sleep_time:
+    name: Sleep Time
+    min: 10
+    max: 60
+    step: 5
+    icon: mdi:sleep
+    unit_of_measurement: min
+  office_watering_delay:
+    name: Watering Delay
+    min: 0
+    max: 360
+    step: 10
+    icon: mdi:timer-sand
+    unit_of_measurement: min
+  office_watering_threshold:
+    name: Watering Threshold
+    min: 0
+    max: 10000
+    step: 100
+    icon: mdi:target
+    unit_of_measurement: clk
+  office_watering_time:
+    name: Watering Time
+    min: 1
+    max: 30
+    step: 1
+    icon: mdi:water-pump
+    unit_of_measurement: s
+```
+
+This will create four [sliders](https://www.home-assistant.io/integrations/input_number/), one for each parameter. Remember to replace `office` with the `MQTT base topic` you have set via the web interface.
+
+Now add the following to your `automations.yaml` file:
+
+```yaml
+- alias: Plant set slider
+  trigger:
+  - platform: mqtt
+    topic: 'plant/+/config'
+  action:
+  - service: input_number.set_value
+    data_template:
+      entity_id: input_number.{{ trigger.topic.split('/')[1] }}_sleep_time
+      value: "{{ trigger.payload_json.sleep_time | float }}"
+  - service: input_number.set_value
+    data_template:
+      entity_id: input_number.{{ trigger.topic.split('/')[1] }}_watering_delay
+      value: "{{ trigger.payload_json.watering_delay | float }}"
+  - service: input_number.set_value
+    data_template:
+      entity_id: input_number.{{ trigger.topic.split('/')[1] }}_watering_threshold
+      value: "{{ trigger.payload_json.watering_threshold | float }}"
+  - service: input_number.set_value
+    data_template:
+      entity_id: input_number.{{ trigger.topic.split('/')[1] }}_watering_time
+      value: "{{ trigger.payload_json.watering_time | float }}"
+
+- alias: Plant slider moved
+  trigger:
+  - platform: state
+    entity_id:
+      - input_number.office_sleep_time
+      - input_number.office_watering_delay
+      - input_number.office_watering_threshold
+      - input_number.office_watering_time
+  action:
+  - service: mqtt.publish
+    data_template:
+      # The topic should always be the after the dot and before the name of the variable we want to set
+      topic: "plant/{{ trigger.entity_id.split('.')[1].split('_')[:-2] | join('_') }}/config"
+      retain: true
+      payload: >
+        {% set topic = trigger.entity_id.split('.')[1].split('_')[:-2] | join('_') %}
+        {
+          "sleep_time": {{ states('input_number.' + topic + '_sleep_time') | int }},
+          "watering_delay": {{ states('input_number.' + topic + '_watering_delay') | int }},
+          "watering_threshold": {{ states('input_number.' + topic + '_watering_threshold') | int }},
+          "watering_time": {{ states('input_number.' + topic + '_watering_time') | int }}
+        }
+```
+
+This makes sure that the MQTT config topic is updated when the slider is moved and that the slider is always set to the MQTT config topic when it changes.
+
+Finally you can add the two sensors and the inputs slider into on group by adding the following to `groups.yaml`:
+
+```yaml
+office_plant:
+    name: "Office Plant"
+    icon: mdi:sprout
+    control: hidden
+    entities:
+    - sensor.office_soil_moisture
+    - sensor.office_voltage
+    - input_number.office_sleep_time
+    - input_number.office_watering_delay
+    - input_number.office_watering_threshold
+    - input_number.office_watering_time
+```
+
+The plant will now show up in the Home Assistant overview like so:
+
+![](img/hass_card.png)
 
 # TODO lists
 
