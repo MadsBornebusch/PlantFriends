@@ -298,94 +298,98 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   // Add routes for the different files and pages
   httpServer.on("/pure-min.css", HTTP_GET, [](AsyncWebServerRequest *request) {
     // Use Pure to style the from: https://purecss.io/forms/
-    request->send(SPIFFS, "/pure-min.css", "text/css");
+    request->send(SPIFFS, F("/pure-min.css"), F("text/css"));
   });
   httpServer.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
     // Som additional css to make it look a little nicer
-    request->send(SPIFFS, "/style.css", "text/css");
+    request->send(SPIFFS, F("/style.css"), F("text/css"));
   });
 
   // This is the main page with the form for configuring the device
   httpServer.on("/", HTTP_GET, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
     auto processor = [&eeprom_config](const String &var) {
-      if (var == "WIFI_SSID")
+      if (var == F("WIFI_SSID"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->wifi_ssid : WIFI_SSID);
-      else if (var == "WIFI_PASSWORD")
+      else if (var == F("WIFI_PASSWORD"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->wifi_password : WIFI_PASSWORD);
-      else if (var == "THINGSPEAK_API_KEY")
+      else if (var == F("THINGSPEAK_API_KEY"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->thingspeak_api_key : THINGSPEAK_API_KEY);
-      else if (var == "MQTT_HOST")
+      else if (var == F("MQTT_HOST"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_host : MQTT_HOST);
-      else if (var == "MQTT_PORT")
+      else if (var == F("MQTT_PORT"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_port : MQTT_PORT);
-      else if (var == "MQTT_USERNAME")
+      else if (var == F("MQTT_USERNAME"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_username : MQTT_USERNAME);
-      else if (var == "MQTT_PASSWORD")
+      else if (var == F("MQTT_PASSWORD"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_password : MQTT_PASSWORD);
-      else if (var == "MQTT_BASE_TOPIC")
+      else if (var == F("MQTT_BASE_TOPIC"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_base_topic : MQTT_BASE_TOPIC);
-      else if (var == "sleep_time")
+      else if (var == F("sleep_time"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->sleep_time : DEFAULT_SLEEP_TIME);
-      else if (var == "watering_delay")
+      else if (var == F("watering_delay"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_delay : DEFAULT_WATERING_DELAY);
-      else if (var == "watering_threshold")
+      else if (var == F("watering_threshold"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_threshold : DEFAULT_WATERING_THRESHOLD);
-      else if (var == "watering_time")
+      else if (var == F("watering_time"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_time : DEFAULT_WATERING_TIME);
 
       return String();
     };
 
     // Send the index as a template
-    request->send(SPIFFS, "/index.html", String(), false, processor);
+    request->send(SPIFFS, F("/index.html"), F("text/html"), false, processor);
   });
 
   // Handle the post request
-  httpServer.on("/config", HTTP_POST, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
-    if (!request->hasArg("wifi_ssid") || !request->hasArg("wifi_password")
-      || !request->hasArg("thingspeak_api_key")
-      || !request->hasArg("mqtt_host") || !request->hasArg("mqtt_port")
-      || !request->hasArg("mqtt_username") || !request->hasArg("mqtt_password") || !request->hasArg("mqtt_base_topic")
-      || !request->hasArg("sleep_time") || !request->hasArg("watering_delay")
-      || !request->hasArg("watering_threshold") || !request->hasArg("watering_time")) {
+  httpServer.on("/", HTTP_POST, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
+    if (!request->hasArg(F("wifi_ssid")) || !request->hasArg(F("wifi_password"))
+      || !request->hasArg(F("thingspeak_api_key"))
+      || !request->hasArg(F("mqtt_host")) || !request->hasArg(F("mqtt_port"))
+      || !request->hasArg(F("mqtt_username")) || !request->hasArg(F("mqtt_password")) || !request->hasArg(F("mqtt_base_topic"))
+      || !request->hasArg(F("sleep_time")) || !request->hasArg(F("watering_delay"))
+      || !request->hasArg(F("watering_threshold")) || !request->hasArg(F("watering_time"))) {
       request->send(400, F("text/plain"), F("400: Invalid request"));
       return;
     }
 
-    strncpy(eeprom_config->wifi_ssid, request->arg("wifi_ssid").c_str(), sizeof(eeprom_config->wifi_ssid) - 1);
+    strncpy(eeprom_config->wifi_ssid, request->arg(F("wifi_ssid")).c_str(), sizeof(eeprom_config->wifi_ssid) - 1);
     eeprom_config->wifi_ssid[sizeof(eeprom_config->wifi_ssid) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    strncpy(eeprom_config->wifi_password, request->arg("wifi_password").c_str(), sizeof(eeprom_config->wifi_password) - 1);
+    strncpy(eeprom_config->wifi_password, request->arg(F("wifi_password")).c_str(), sizeof(eeprom_config->wifi_password) - 1);
     eeprom_config->wifi_password[sizeof(eeprom_config->wifi_password) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    strncpy(eeprom_config->thingspeak_api_key, request->arg("thingspeak_api_key").c_str(), sizeof(eeprom_config->thingspeak_api_key) - 1);
+    strncpy(eeprom_config->thingspeak_api_key, request->arg(F("thingspeak_api_key")).c_str(), sizeof(eeprom_config->thingspeak_api_key) - 1);
     eeprom_config->thingspeak_api_key[sizeof(eeprom_config->thingspeak_api_key) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    strncpy(eeprom_config->mqtt_host, request->arg("mqtt_host").c_str(), sizeof(eeprom_config->mqtt_host) - 1);
+    strncpy(eeprom_config->mqtt_host, request->arg(F("mqtt_host")).c_str(), sizeof(eeprom_config->mqtt_host) - 1);
     eeprom_config->mqtt_host[sizeof(eeprom_config->mqtt_host) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    eeprom_config->mqtt_port = request->arg("mqtt_port").toInt();
+    eeprom_config->mqtt_port = request->arg(F("mqtt_port")).toInt();
 
-    strncpy(eeprom_config->mqtt_username, request->arg("mqtt_username").c_str(), sizeof(eeprom_config->mqtt_username) - 1);
+    strncpy(eeprom_config->mqtt_username, request->arg(F("mqtt_username")).c_str(), sizeof(eeprom_config->mqtt_username) - 1);
     eeprom_config->mqtt_username[sizeof(eeprom_config->mqtt_username) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    strncpy(eeprom_config->mqtt_password, request->arg("mqtt_password").c_str(), sizeof(eeprom_config->mqtt_password) - 1);
+    strncpy(eeprom_config->mqtt_password, request->arg(F("mqtt_password")).c_str(), sizeof(eeprom_config->mqtt_password) - 1);
     eeprom_config->mqtt_password[sizeof(eeprom_config->mqtt_password) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    strncpy(eeprom_config->mqtt_base_topic, request->arg("mqtt_base_topic").c_str(), sizeof(eeprom_config->mqtt_base_topic) - 1);
+    strncpy(eeprom_config->mqtt_base_topic, request->arg(F("mqtt_base_topic")).c_str(), sizeof(eeprom_config->mqtt_base_topic) - 1);
     eeprom_config->mqtt_base_topic[sizeof(eeprom_config->mqtt_base_topic) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    eeprom_config->sleep_time = request->arg("sleep_time").toInt();
-    eeprom_config->watering_delay = request->arg("watering_delay").toInt();
-    eeprom_config->watering_threshold = request->arg("watering_threshold").toInt();
-    eeprom_config->watering_time = request->arg("watering_time").toInt();
+    eeprom_config->sleep_time = request->arg(F("sleep_time")).toInt();
+    eeprom_config->watering_delay = request->arg(F("watering_delay")).toInt();
+    eeprom_config->watering_threshold = request->arg(F("watering_threshold")).toInt();
+    eeprom_config->watering_time = request->arg(F("watering_time")).toInt();
 
     eeprom_config->override_retained_config_topic = true; // Make sure the config topic gets overriden on the next boot
 
     // The values where succesfully configured
     eeprom_config->magic_number = MAGIC_NUMBER;
 
-    request->redirect(F("/")); // Redirect to the root
+    // Close the connection
+    AsyncWebServerResponse *response = request->beginResponse(302);
+    response->addHeader(F("Connection"), F("close"));
+    response->addHeader(F("Access-Control-Allow-Origin"), F("*"));
+    request->send(response);
 
     *p_run_hotspot = false; // Stop the hotspot when the user submits new values
   });
@@ -560,10 +564,10 @@ void setup() {
           return;
         }
 
-        JsonVariant sleep_time_variant = jsonDoc["sleep_time"];
-        JsonVariant watering_delay_variant = jsonDoc["watering_delay"];
-        JsonVariant watering_threshold_variant = jsonDoc["watering_threshold"];
-        JsonVariant watering_time_variant = jsonDoc["watering_time"];
+        JsonVariant sleep_time_variant = jsonDoc[F("sleep_time")];
+        JsonVariant watering_delay_variant = jsonDoc[F("watering_delay")];
+        JsonVariant watering_threshold_variant = jsonDoc[F("watering_threshold")];
+        JsonVariant watering_time_variant = jsonDoc[F("watering_time")];
 
         if (sleep_time_variant.isNull() || watering_delay_variant.isNull() ||
           watering_threshold_variant.isNull() || watering_time_variant.isNull()) {
@@ -637,10 +641,10 @@ void setup() {
         eeprom_config.override_retained_config_topic = false; // Will be writen to the EEPROM further down
 
         jsonDoc.clear(); // Make sure we start with a blank document
-        jsonDoc["sleep_time"] = eeprom_config.sleep_time;
-        jsonDoc["watering_delay"] = eeprom_config.watering_delay;
-        jsonDoc["watering_threshold"] = eeprom_config.watering_threshold;
-        jsonDoc["watering_time"] = eeprom_config.watering_time;
+        jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
+        jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
+        jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
+        jsonDoc[F("watering_time")] = eeprom_config.watering_time;
 
         size_t n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
         if (mqttPublishBlocking(config_topic, jsonBuffer, n, true, 5 * 10))
@@ -655,20 +659,20 @@ void setup() {
 
       // Send messsages, so the sensor is auto discovered by Home Assistant - see: https://www.home-assistant.io/docs/mqtt/discovery/
       jsonDoc.clear(); // Make sure we start with a blank document
-      jsonDoc["name"] = name + F(" Soil Moisture");
-      jsonDoc["~"] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
-      jsonDoc["stat_t"] = F("~/state");
-      jsonDoc["json_attr_t"] = F("~/state");
-      jsonDoc["val_tpl"] = F("{{value_json.soil_moisture}}");
-      jsonDoc["unit_of_meas"] = F("clk");
-      jsonDoc["ic"] = F("mdi:sprout");
-      jsonDoc["frc_upd"] = true; // Make sure that the sensor value is always stored and not just when it changes
-      jsonDoc["uniq_id"] = String(chip_id) + F("_soil_moisture");
+      jsonDoc[F("name")] = name + F(" Soil Moisture");
+      jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+      jsonDoc[F("stat_t")] = F("~/state");
+      jsonDoc[F("json_attr_t")] = F("~/state");
+      jsonDoc[F("val_tpl")] = F("{{value_json.soil_moisture}}");
+      jsonDoc[F("unit_of_meas")] = F("clk");
+      jsonDoc[F("ic")] = F("mdi:sprout");
+      jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
+      jsonDoc[F("uniq_id")] = String(chip_id) + F("_soil_moisture");
 
       // Set device information used for the device registry
-      jsonDoc["device"]["name"] = name + F(" Plant");
-      jsonDoc["device"]["sw"] = SW_VERSION;
-      jsonDoc["device"].createNestedArray("ids").add(String(chip_id));
+      jsonDoc[F("device")][F("name")] = name + F(" Plant");
+      jsonDoc[F("device")][F("sw")] = SW_VERSION;
+      jsonDoc[F("device")].createNestedArray(F("ids")).add(String(chip_id));
 
       size_t n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
       if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("S/config"), jsonBuffer, n, true, 5 * 10))
@@ -678,20 +682,20 @@ void setup() {
 
       // Send the voltage "sensor" as well
       jsonDoc.clear(); // Make sure we start with a blank document
-      jsonDoc["name"] = name + F(" Voltage");
-      jsonDoc["~"] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
-      jsonDoc["stat_t"] = F("~/state");
-      jsonDoc["json_attr_t"] = F("~/state");
-      jsonDoc["val_tpl"] = F("{{value_json.voltage}}");
-      jsonDoc["unit_of_meas"] = F("V");
-      jsonDoc["ic"] = F("mdi:solar-panel-large");
-      jsonDoc["frc_upd"] = true; // Make sure that the sensor value is always stored and not just when it changes
-      jsonDoc["uniq_id"] = String(chip_id) + F("_voltage");
+      jsonDoc[F("name")] = name + F(" Voltage");
+      jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+      jsonDoc[F("stat_t")] = F("~/state");
+      jsonDoc[F("json_attr_t")] = F("~/state");
+      jsonDoc[F("val_tpl")] = F("{{value_json.voltage}}");
+      jsonDoc[F("unit_of_meas")] = F("V");
+      jsonDoc[F("ic")] = F("mdi:solar-panel-large");
+      jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
+      jsonDoc[F("uniq_id")] = String(chip_id) + F("_voltage");
 
       // Set device information used for the device registry
-      jsonDoc["device"]["name"] = name + F(" Plant");
-      jsonDoc["device"]["sw"] = SW_VERSION;
-      jsonDoc["device"].createNestedArray("ids").add(String(chip_id));
+      jsonDoc[F("device")][F("name")] = name + F(" Plant");
+      jsonDoc[F("device")][F("sw")] = SW_VERSION;
+      jsonDoc[F("device")].createNestedArray(F("ids")).add(String(chip_id));
 
       n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
       if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("V/config"), jsonBuffer, n, true, 5 * 10))
@@ -700,15 +704,15 @@ void setup() {
         Serial.println(F("Failed to send voltage discovery message due to timeout"));
 
       jsonDoc.clear(); // Make sure we start with a blank document
-      jsonDoc["soil_moisture"] = soil_moisture;
-      jsonDoc["voltage"] = voltage / 1000.0f;
-      jsonDoc["sleep_time"] = eeprom_config.sleep_time;
-      jsonDoc["watering_delay"] = eeprom_config.watering_delay;
-      jsonDoc["watering_threshold"] = eeprom_config.watering_threshold;
-      jsonDoc["watering_time"] = eeprom_config.watering_time;
-      jsonDoc["sleep_num"] = sleep_data.sleep_num;
-      jsonDoc["watering_delay_cycles"] = sleep_data.watering_delay_cycles;
-      jsonDoc["version"] = SW_VERSION;
+      jsonDoc[F("soil_moisture")] = soil_moisture;
+      jsonDoc[F("voltage")] = voltage / 1000.0f;
+      jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
+      jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
+      jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
+      jsonDoc[F("watering_time")] = eeprom_config.watering_time;
+      jsonDoc[F("sleep_num")] = sleep_data.sleep_num;
+      jsonDoc[F("watering_delay_cycles")] = sleep_data.watering_delay_cycles;
+      jsonDoc[F("version")] = SW_VERSION;
 
       n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
       if (mqttPublishBlocking(String(F("plant/")) + String(eeprom_config.mqtt_base_topic) + F("/state"), jsonBuffer, n, false, 5 * 10))
