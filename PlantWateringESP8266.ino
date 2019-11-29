@@ -8,7 +8,7 @@
 #include "AsyncElegantOtaSpiffs.h"
 #include "secret.h"
 
-#define SW_VERSION  "1.0.0"
+#define SW_VERSION "1.0.0"
 
 // Define the access point SSID and password
 #define WIFI_AP_SSID "PlantWateringESP8266"
@@ -140,28 +140,6 @@ static long getMean(int *array, uint8_t n) {
     sum += array[i];
   return sum/n;
 }
-
-/*
-static long getMeanWithoutMinMax(long *array, uint8_t n){
-  long sum = 0;
-  long min = 1000000;
-  long max = 0;
-  for(uint8_t i = 0; i<n; i++){
-    if(min > array[i])
-      min = array[i];
-    if(max < array[i])
-      max = array[i];
-  }
-  uint8_t n_meas = 0;
-  for(uint8_t i = 0; i<n; i++){
-    if(array[i] != min && array[i] != max){
-      sum += array[i];
-      n_meas++;
-    }
-  }
-  return sum/n_meas;
-}
-*/
 
 static void handleLongSleep(sleep_data_t *sleep_data) {
   if (sizeof(sleep_data_t) % 4 != 0) {
@@ -375,18 +353,29 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     strncpy(eeprom_config->mqtt_base_topic, request->arg(F("mqtt_base_topic")).c_str(), sizeof(eeprom_config->mqtt_base_topic) - 1);
     eeprom_config->mqtt_base_topic[sizeof(eeprom_config->mqtt_base_topic) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    eeprom_config->sleep_time = request->arg(F("sleep_time")).toInt();
-    eeprom_config->watering_delay = request->arg(F("watering_delay")).toInt();
-    eeprom_config->watering_threshold = request->arg(F("watering_threshold")).toInt();
-    eeprom_config->watering_time = request->arg(F("watering_time")).toInt();
+    decltype(eeprom_config_t::sleep_time) sleep_time = request->arg(F("sleep_time")).toInt();
+    decltype(eeprom_config_t::watering_delay) watering_delay = request->arg(F("watering_delay")).toInt();
+    decltype(eeprom_config_t::watering_threshold) watering_threshold = request->arg(F("watering_threshold")).toInt();
+    decltype(eeprom_config_t::watering_time) watering_time = request->arg(F("watering_time")).toInt();
 
-    eeprom_config->override_retained_config_topic = true; // Make sure the config topic gets overriden on the next boot
+    bool changed = eeprom_config->sleep_time != sleep_time ||
+      eeprom_config->watering_delay != watering_delay ||
+      eeprom_config->watering_threshold != watering_threshold ||
+      eeprom_config->watering_time != watering_time;
 
+    // Check if the values has changed
+    if (changed) {
+      eeprom_config->override_retained_config_topic = true; // Make sure the config topic gets overriden on the next boot
+      eeprom_config->sleep_time = sleep_time;
+      eeprom_config->watering_delay = watering_delay;
+      eeprom_config->watering_threshold = watering_threshold;
+      eeprom_config->watering_time = watering_time;
+    }
     // The values where succesfully configured
     eeprom_config->magic_number = MAGIC_NUMBER;
 
     // Close the connection
-    AsyncWebServerResponse *response = request->beginResponse(302);
+    AsyncWebServerResponse *response = request->beginResponse(200, F("text/plain"), F("OK"));
     response->addHeader(F("Connection"), F("close"));
     response->addHeader(F("Access-Control-Allow-Origin"), F("*"));
     request->send(response);
@@ -505,13 +494,10 @@ void setup() {
   }
   Serial.println(F("Read soil moisture"));
   int soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
-  Serial.println(F("Calculated mean soil moisture"));
-  //int soil_moisture_filtered = getMeanWithoutMinMax(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
   Serial.print(F("Successfully found soil moisture: ")); Serial.println(soil_moisture);
-  //Serial.print("Filtered soil moisture: "); Serial.println(soil_moisture_filtered);
 
   // Water plant
-  if(soil_moisture <= eeprom_config.watering_threshold && sleep_data.watering_delay_cycles <= 1){
+  if (soil_moisture <= eeprom_config.watering_threshold && sleep_data.watering_delay_cycles <= 1) {
     Serial.println(F("Watering plant!!"));
     pinMode(WATERING_OUT, OUTPUT);
     analogWrite(WATERING_OUT, 1023U * 3U / 4U);
@@ -588,7 +574,7 @@ void setup() {
             eeprom_config.watering_threshold != watering_threshold ||
             eeprom_config.watering_time != watering_time;
 
-          // TODO: Just use the local varialble and take a mutex
+          // TODO: Take a mutex
           if (changed) {
             eeprom_config.sleep_time = sleep_time;
             eeprom_config.watering_delay = watering_delay;
@@ -638,8 +624,6 @@ void setup() {
 
       // Override the retained config topic, so we do not use the old values after they have been changed via the web interface
       if (eeprom_config.override_retained_config_topic) {
-        eeprom_config.override_retained_config_topic = false; // Will be writen to the EEPROM further down
-
         jsonDoc.clear(); // Make sure we start with a blank document
         jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
         jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
@@ -647,9 +631,10 @@ void setup() {
         jsonDoc[F("watering_time")] = eeprom_config.watering_time;
 
         size_t n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
-        if (mqttPublishBlocking(config_topic, jsonBuffer, n, true, 5 * 10))
+        if (mqttPublishBlocking(config_topic, jsonBuffer, n, true, 5 * 10)) {
+          eeprom_config.override_retained_config_topic = false; // Will be writen to the EEPROM further down
           Serial.printf("Successfully overrode MQTT config topic: %s, length: %u\n", jsonBuffer, n);
-        else
+        } else
           Serial.println(F("Failed to override MQTT config topic"));
       } else {
         // Subscribe to the config topic, so the user can set the value via MQTT
