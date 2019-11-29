@@ -175,6 +175,10 @@ The plant will now show up in the Home Assistant overview like so:
 
 ![](img/hass_card.png)
 
+# ThingSpeak
+
+TOOD: Add guide
+
 # TODO lists
 
 ## TODO
@@ -185,17 +189,16 @@ The plant will now show up in the Home Assistant overview like so:
 ## TODO code
 
 - [x] [OTA update via http](https://arduino-esp8266.readthedocs.io/en/latest/ota_updates/readme.html#http-server)
-- [ ] OTA update via Github release - enable/disable using checkbox
-- [ ] Send via MQTT when it watered the plant
-- [ ] Verify checksum of flashed binary
 - [x] [Support Home Assistant discovery](https://www.home-assistant.io/docs/mqtt/discovery/)
 - [x] Make a struct for variables to save in RTC memory
-- [ ] Only check for OTA update once per day (24 hr)
-- [ ] [Use SPIFFS file system to store configuration file (soil moisture etc)](https://arduino-esp8266.readthedocs.io/en/latest/filesystem.html)
 - [x] Set the sleep time, watering delay, water threshold and water time via MQTT
-- [ ] [Support secure MQTT (SSL)](https://github.com/marvinroger/async-mqtt-client/blob/master/examples/FullyFeaturedSSL/src/main.cpp)
 - [x] Use MQTT for data
 - [x] Show MQTT data in Home Assistant
+- [ ] OTA update via Github release - enable/disable using checkbox
+  - [ ] Verify checksum of flashed binary
+  - [ ] Only check for OTA update once per day (24 hr)
+- [ ] Send via MQTT when it watered the plant
+- [ ] [Support secure MQTT (SSL)](https://github.com/marvinroger/async-mqtt-client/blob/master/examples/FullyFeaturedSSL/src/main.cpp)
 
 ## TODO code (low priority)
 
