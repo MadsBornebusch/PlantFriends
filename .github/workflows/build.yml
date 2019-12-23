@@ -19,24 +19,29 @@ jobs:
     - name: Compile project
       run: |
         echo -e '#define WIFI_SSID ""\n#define WIFI_PASSWORD ""\n#define THINGSPEAK_API_KEY ""\n' > secret.h
-        echo -e '#define MQTT_HOST IPAddress(192, 168, 1, 10)\n#define MQTT_PORT 1883\n#define MQTT_USERNAME ""\n#define MQTT_PASSWORD ""\n#define MQTT_BASE_TOPIC ""' >> secret.h
+        echo -e '#define MQTT_HOST "192.168.1.10"\n#define MQTT_PORT 1883\n#define MQTT_USERNAME ""\n#define MQTT_PASSWORD ""\n#define MQTT_BASE_TOPIC ""' >> secret.h
+        # Create directory for storing the binaries
+        mkdir binaries
+
+        # Build firmware and file system images
         pio run
-    - name: Prepare binary
-      run: |
-        mkdir binary
-        cp -v .pio/build/esp12e/firmware.bin binary/PlantWateringESP8266.bin
-        pushd binary
+        cp -v .pio/build/esp12e/firmware.bin binaries/PlantWateringESP8266.bin
+        pio run -t buildfs
+        cp -v .pio/build/esp12e/spiffs.bin binaries/
+
+        # Calculate the checksum
+        pushd binaries
         sha256sum * > SHA256SUMS
         popd
     - uses: actions/upload-artifact@v1
       with:
-        name: binary-${{ github.sha }}
-        path: binary
+        name: binaries-${{ github.sha }}
+        path: binaries
     - name: Release
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: binary/*
+        files: binaries/*
         draft: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
