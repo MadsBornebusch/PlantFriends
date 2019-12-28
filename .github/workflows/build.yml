@@ -31,7 +31,7 @@ jobs:
 
         # Calculate the checksum
         pushd binaries
-        sha256sum * > SHA256SUMS
+        md5sum * > MD5SUMS
         popd
     - uses: actions/upload-artifact@v1
       with:
