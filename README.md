@@ -100,6 +100,12 @@ input_number:
     step: 1
     icon: mdi:water-pump
     unit_of_measurement: s
+  office_automatic_ota:
+    name: Automatic OTA
+    min: 0
+    max: 1
+    step: 1
+    icon: mdi:cellphone-arrow-down
 ```
 
 This will create four [sliders](https://www.home-assistant.io/integrations/input_number/), one for each parameter. Remember to replace `office` with the `MQTT base topic` you have set via the web interface.
@@ -128,6 +134,10 @@ Now add the following to your `automations.yaml` file:
     data_template:
       entity_id: input_number.{{ trigger.topic.split('/')[1] }}_watering_time
       value: "{{ trigger.payload_json.watering_time | float }}"
+  - service: input_number.set_value
+    data_template:
+      entity_id: input_number.{{ trigger.topic.split('/')[1] }}_automatic_ota
+      value: "{{ trigger.payload_json.automatic_ota | float }}"
 
 - alias: Plant slider moved
   trigger:
@@ -137,6 +147,7 @@ Now add the following to your `automations.yaml` file:
       - input_number.office_watering_delay
       - input_number.office_watering_threshold
       - input_number.office_watering_time
+      - input_number.office_automatic_ota
   action:
   - service: mqtt.publish
     data_template:
@@ -149,7 +160,8 @@ Now add the following to your `automations.yaml` file:
           "sleep_time": {{ states('input_number.' + topic + '_sleep_time') | int }},
           "watering_delay": {{ states('input_number.' + topic + '_watering_delay') | int }},
           "watering_threshold": {{ states('input_number.' + topic + '_watering_threshold') | int }},
-          "watering_time": {{ states('input_number.' + topic + '_watering_time') | int }}
+          "watering_time": {{ states('input_number.' + topic + '_watering_time') | int }},
+          "automatic_ota": {{ ((states('input_number.' + topic + '_automatic_ota') | int) > 0) | tojson }}
         }
 ```
 
@@ -169,6 +181,7 @@ office_plant:
     - input_number.office_watering_delay
     - input_number.office_watering_threshold
     - input_number.office_watering_time
+    - input_number.office_automatic_ota
 ```
 
 The plant will now show up in the Home Assistant overview like so:
@@ -194,9 +207,9 @@ TOOD: Add guide
 - [x] Set the sleep time, watering delay, water threshold and water time via MQTT
 - [x] Use MQTT for data
 - [x] Show MQTT data in Home Assistant
-- [ ] OTA update via Github release - enable/disable using checkbox
-  - [ ] Verify checksum of flashed binary
-  - [ ] Only check for OTA update once per day (24 hr)
+- [x] OTA update via Github release - enable/disable using checkbox
+  - [x] Verify checksum of flashed binary
+  - [x] Only check for OTA update once per day (24 hr)
 - [ ] Send via MQTT when it watered the plant
 - [ ] [Support secure MQTT (SSL)](https://github.com/marvinroger/async-mqtt-client/blob/master/examples/FullyFeaturedSSL/src/main.cpp)
 

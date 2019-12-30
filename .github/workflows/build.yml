@@ -25,9 +25,9 @@ jobs:
 
         # Build firmware and file system images
         pio run
-        cp -v .pio/build/esp12e/firmware.bin binaries/PlantWateringESP8266.bin
+        cp -v .pio/build/esp12e/firmware.bin binaries/PlantFriends_firmware.bin
         pio run -t buildfs
-        cp -v .pio/build/esp12e/spiffs.bin binaries/
+        cp -v .pio/build/esp12e/spiffs.bin binaries/PlantFriends_spiffs.bin
 
         # Calculate the checksum
         pushd binaries
