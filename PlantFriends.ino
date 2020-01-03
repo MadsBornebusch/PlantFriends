@@ -5,6 +5,7 @@
 #include <ESP8266httpUpdate.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WiFi.h>
+#include "WiFiClientSecure.h"
 
 #include "AsyncElegantOtaSpiffs.h"
 #include "secret.h"
@@ -89,7 +90,7 @@ typedef struct {
 } __attribute__ ((packed, aligned(4))) sleep_data_t; // The struct needs to be 4-byte aligned in the RTC memory
 
 // Wifi
-WiFiClient client;
+WiFiClientSecure client;
 //#define WIFI_SSID "YourWifiSSID" // Defined in secret.h
 //#define WIFI_PASSWORD "YourWifiPassword" // Defined in secret.h
 
@@ -775,6 +776,7 @@ void setup() {
   }
 #endif
 
+  bool ota_reboot = false; // We will handle the OTA reboot manually, as we need to save the EEPROM values first
   if (eeprom_config.automatic_ota && sleep_data.firmware_update_counter >= 24U * 60U / SLEEP_INTERVAL) { // Only check for updates every 24 hrs
     sleep_data.firmware_update_counter = 0;
 
@@ -784,34 +786,90 @@ void setup() {
     // on much longer than it will be off.
     ESPhttpUpdate.setLedPin(LED_PIN, LOW);
 
-    // Lambda function for printing the returned HTTP update return value
-    auto http_update_status = [](t_httpUpdate_return ret) {
-      switch (ret) {
-        case HTTP_UPDATE_FAILED:
-          Serial.printf("HTTP_UPDATE_FAILED Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
-          break;
-        case HTTP_UPDATE_NO_UPDATES:
-          Serial.println(F("HTTP_UPDATE_NO_UPDATES"));
-          break;
-        case HTTP_UPDATE_OK:
-          Serial.println(F("HTTP_UPDATE_OK"));
-          break;
+    // Set time via NTP, as required for x.509 validation
+    auto setClock = [](int timeout = 5 * 2) { // Use a default timeout of 5 seconds
+      Serial.println(F("Setting time using SNTP"));
+      configTime(0U * 3600U, 0, "pool.ntp.org", "time.nist.gov");
+
+      Serial.print(F("Waiting for NTP time sync"));
+      time_t now = time(nullptr);
+      while (now < 8 * 3600 * 2 && timeout-- > 0) {
+        delay(500);
+        Serial.print(F("."));
+        now = time(nullptr);
       }
+      Serial.println();
+      if (timeout == 0) // Checkout if there was a timeout
+        return false;
+      struct tm timeinfo;
+      gmtime_r(&now, &timeinfo);
+      Serial.print(F("Current time: "));
+      Serial.print(asctime(&timeinfo)); // Note "asctime" includes a '\n' character
+      return true;
     };
 
-    // The source code for the update server is available at:https://github.com/Lauszus/PlantFriendsApp
-    String url = F("https://plant.lauszus.com/update");
+    if (setClock()) {
+      // Add Let's Encrypt as a trusted CA
+      static const char digicert[] PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIEkjCCA3qgAwIBAgIQCgFBQgAAAVOFc2oLheynCDANBgkqhkiG9w0BAQsFADA/
+MSQwIgYDVQQKExtEaWdpdGFsIFNpZ25hdHVyZSBUcnVzdCBDby4xFzAVBgNVBAMT
+DkRTVCBSb290IENBIFgzMB4XDTE2MDMxNzE2NDA0NloXDTIxMDMxNzE2NDA0Nlow
+SjELMAkGA1UEBhMCVVMxFjAUBgNVBAoTDUxldCdzIEVuY3J5cHQxIzAhBgNVBAMT
+GkxldCdzIEVuY3J5cHQgQXV0aG9yaXR5IFgzMIIBIjANBgkqhkiG9w0BAQEFAAOC
+AQ8AMIIBCgKCAQEAnNMM8FrlLke3cl03g7NoYzDq1zUmGSXhvb418XCSL7e4S0EF
+q6meNQhY7LEqxGiHC6PjdeTm86dicbp5gWAf15Gan/PQeGdxyGkOlZHP/uaZ6WA8
+SMx+yk13EiSdRxta67nsHjcAHJyse6cF6s5K671B5TaYucv9bTyWaN8jKkKQDIZ0
+Z8h/pZq4UmEUEz9l6YKHy9v6Dlb2honzhT+Xhq+w3Brvaw2VFn3EK6BlspkENnWA
+a6xK8xuQSXgvopZPKiAlKQTGdMDQMc2PMTiVFrqoM7hD8bEfwzB/onkxEz0tNvjj
+/PIzark5McWvxI0NHWQWM6r6hCm21AvA2H3DkwIDAQABo4IBfTCCAXkwEgYDVR0T
+AQH/BAgwBgEB/wIBADAOBgNVHQ8BAf8EBAMCAYYwfwYIKwYBBQUHAQEEczBxMDIG
+CCsGAQUFBzABhiZodHRwOi8vaXNyZy50cnVzdGlkLm9jc3AuaWRlbnRydXN0LmNv
+bTA7BggrBgEFBQcwAoYvaHR0cDovL2FwcHMuaWRlbnRydXN0LmNvbS9yb290cy9k
+c3Ryb290Y2F4My5wN2MwHwYDVR0jBBgwFoAUxKexpHsscfrb4UuQdf/EFWCFiRAw
+VAYDVR0gBE0wSzAIBgZngQwBAgEwPwYLKwYBBAGC3xMBAQEwMDAuBggrBgEFBQcC
+ARYiaHR0cDovL2Nwcy5yb290LXgxLmxldHNlbmNyeXB0Lm9yZzA8BgNVHR8ENTAz
+MDGgL6AthitodHRwOi8vY3JsLmlkZW50cnVzdC5jb20vRFNUUk9PVENBWDNDUkwu
+Y3JsMB0GA1UdDgQWBBSoSmpjBH3duubRObemRWXv86jsoTANBgkqhkiG9w0BAQsF
+AAOCAQEA3TPXEfNjWDjdGBX7CVW+dla5cEilaUcne8IkCJLxWh9KEik3JHRRHGJo
+uM2VcGfl96S8TihRzZvoroed6ti6WqEBmtzw3Wodatg+VyOeph4EYpr/1wXKtx8/
+wApIvJSwtmVi4MFU5aMqrSDE6ea73Mj2tcMyo5jMd6jmeWUHK8so/joWUoHOUgwu
+X4Po1QYz+3dszkDqMp4fklxBwXRsW10KXzPMTZ+sOPAveyxindmjkW8lGy+QsRlG
+PfZ+G6Z6h7mjem0Y+iWlkYcV4PIWL1iwBi8saCbGS5jN2p8M+X+Q7UNKEkROb3N6
+KOqkqm57TH2H3eDJAkSnh6/DNFu0Qg==
+-----END CERTIFICATE-----
+)EOF";
+      X509List cert(digicert);
+      client.setTrustAnchors(&cert);
 
-    Serial.println(F("Checking for SPIFFS update"));
-    ESPhttpUpdate.rebootOnUpdate(false); // Do not reboot after flashing the SPIFFS, as we need to update the firmware as well
-    t_httpUpdate_return ret = ESPhttpUpdate.updateSpiffs(client, url, SW_VERSION);
-    if (ret == HTTP_UPDATE_OK) {
-      Serial.println(F("Updating firmware..."));
-      ESPhttpUpdate.rebootOnUpdate(true); // Reboot after we are done
-      ret = ESPhttpUpdate.update(client, url, SW_VERSION);
-      http_update_status(ret);
-    } else
-      http_update_status(ret);
+      // The source code for the update server is available at: https://github.com/Lauszus/PlantFriendsApp
+      String url = F("https://plant.lauszus.com/update");
+
+      // Lambda function for printing the HTTP update return value
+      auto http_update_status = [](t_httpUpdate_return ret) {
+        switch (ret) {
+          case HTTP_UPDATE_FAILED:
+            Serial.printf("HTTP Update Failed - Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+            break;
+          case HTTP_UPDATE_NO_UPDATES:
+            Serial.printf("%s is already the newest version available\n", SW_VERSION);
+            break;
+          case HTTP_UPDATE_OK:
+            break;
+        }
+      };
+
+      Serial.println(F("Checking for SPIFFS update"));
+      ESPhttpUpdate.rebootOnUpdate(false); // Do not reboot after flashing. We will handle it manually instead
+      t_httpUpdate_return ret = ESPhttpUpdate.updateSpiffs(client, url, SW_VERSION);
+      if (ret == HTTP_UPDATE_OK) {
+        Serial.println(F("Updating firmware..."));
+        ret = ESPhttpUpdate.update(client, url, SW_VERSION);
+        ota_reboot = ret == HTTP_UPDATE_OK; // Reboot if the update was successful
+        http_update_status(ret);
+      } else
+        http_update_status(ret);
+    }
   }
 
   // Replace values in RAM with the modified values
@@ -820,6 +878,15 @@ void setup() {
 
   // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
   EEPROM.end();
+
+  if (ota_reboot) {
+    // Write the sleep data manually, as we will be doing a software reset
+    if (!ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR, (uint32_t*)&sleep_data, sizeof(sleep_data_t)))
+      Serial.println(F("Failed to write RTC user memory"));
+    Serial.println(F("OTA was successful. Rebooting..."));
+    Serial.flush();
+    ESP.restart();
+  }
 
   Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config.sleep_time); Serial.println(F(" min"));
 
