@@ -1,11 +1,11 @@
-# Plant watering ESP8266
+# Plant Friends
 
 The code is licensed under the GNU General Public License Version 3.
 
 The PCB is licensed under the Creative Commons Attribution-ShareAlike 4.0 license due to using an [ESP8266 kicad library](https://github.com/jdunmire/kicad-ESP8266) and a particular [soil moisture probe design](https://github.com/acolomitchi/cap-soil-moisture-v2).
 _________
 
-[![](https://github.com/MadsBornebusch/PlantWateringESP8266/workflows/Plant%20Watering%20ESP8266%20CI/badge.svg)](https://github.com/MadsBornebusch/PlantWateringESP8266/actions?query=branch%3Amaster)
+[![](https://github.com/MadsBornebusch/PlantFriends/workflows/Plant%20Friends%20CI/badge.svg)](https://github.com/MadsBornebusch/PlantFriends/actions?query=branch%3Amaster)
 
 This is a plant watering ESP8266.
 
@@ -41,13 +41,13 @@ The WiFi, ThingSpeak and MQTT settings can be configured via a web interface:
 
 If you do not want to use ThingSpeak simply leave the `ThingSpeak API key` field empty. Similarly the MQTT can be disabled by leaving the `MQTT base topic` empty.
 
-At first boot the module will turn on a hotspot with the SSID: `PlantWateringESP8266` and password: `plantsarecool`.
+At first boot the module will turn on a hotspot with the SSID: `PlantFriends` and password: `plantsarecool`.
 
-After logging on to the WiFI simply navigate to <http://plantwateringesp8266.local> or <http://192.168.4.1> to configure the module.
+After logging on to the WiFI simply navigate to <http://plantfriends.local> or <http://192.168.4.1> to configure the module.
 
 The device can be put back into hotspot mode by shorting the TX and RX pins and restarting the module.
 
-A new firmware and file system image can be uploaded by navigation to <http://plantwateringesp8266.local/update> or <http://192.168.4.1/update>.
+A new firmware and file system image can be uploaded by navigation to <http://plantfriends.local/update> or <http://192.168.4.1/update>.
 
 # [Home Assistant](https://www.home-assistant.io/)
 

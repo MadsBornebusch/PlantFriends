@@ -1,4 +1,4 @@
-name: Plant Watering ESP8266 CI
+name: Plant Friends CI
 
 on: [push, pull_request]
 

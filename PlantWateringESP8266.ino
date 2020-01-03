@@ -12,7 +12,7 @@
 #define SW_VERSION "1.0.0"
 
 // Define the access point SSID and password
-#define WIFI_AP_SSID "PlantWateringESP8266"
+#define WIFI_AP_SSID "PlantFriends"
 #define WIFI_AP_PASSWORD "plantsarecool"
 
 // Default sleep time in minutes
@@ -269,9 +269,9 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   IPAddress ip = WiFi.softAPIP();
   Serial.print(F("AP IP address: ")); Serial.println(ip);
 
-  MDNS.begin(F("plantwateringesp8266"));
+  MDNS.begin(F("plantfriends"));
   MDNS.addService(F("http"), F("tcp"), 80);
-  Serial.println(F("Hostname: http://plantwateringesp8266.local"));
+  Serial.println(F("Hostname: http://plantfriends.local"));
 
   if (!SPIFFS.begin()) {
     Serial.println(F("An Error has occurred while mounting SPIFFS! Rebooting..."));
