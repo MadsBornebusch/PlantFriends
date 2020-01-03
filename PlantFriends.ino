@@ -555,51 +555,67 @@ void setup() {
     });
     mqttClient.onMessage([&config_topic, &eeprom_config](char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
       if (config_topic == topic) {
-        StaticJsonDocument<JSON_OBJECT_SIZE(5)> jsonDoc; // Create a document with room for the five objects
-        DeserializationError error = deserializeJson(jsonDoc, payload);
-        if (error) { // Test if parsing succeeds
-          Serial.print(F("deserializeJson() failed: ")); Serial.println(error.c_str());
-          serializeJson(jsonDoc, Serial);
-          Serial.println();
-          return;
-        }
-
-        JsonVariant sleep_time_variant = jsonDoc[F("sleep_time")];
-        JsonVariant watering_delay_variant = jsonDoc[F("watering_delay")];
-        JsonVariant watering_threshold_variant = jsonDoc[F("watering_threshold")];
-        JsonVariant watering_time_variant = jsonDoc[F("watering_time")];
-        JsonVariant automatic_ota_variant = jsonDoc[F("automatic_ota")];
-
-        if (sleep_time_variant.isNull() || watering_delay_variant.isNull() ||
-          watering_threshold_variant.isNull() || watering_time_variant.isNull() ||
-          automatic_ota_variant.isNull()) {
-            Serial.print(F("The JSON payload does not contain all the keys: ")); serializeJson(jsonDoc, Serial);
+        if (eeprom_config.magic_number == MAGIC_NUMBER) {
+          StaticJsonDocument<JSON_OBJECT_SIZE(5)> jsonDoc; // Create a document with room for the five objects
+          DeserializationError error = deserializeJson(jsonDoc, payload);
+          if (error) { // Test if parsing succeeds
+            Serial.print(F("deserializeJson() failed: ")); Serial.println(error.c_str());
+            serializeJson(jsonDoc, Serial);
             Serial.println();
             return;
-        }
+          }
 
-        // Read the values
-        auto sleep_time = sleep_time_variant.as<decltype(eeprom_config_t::sleep_time)>();
-        auto watering_delay = watering_delay_variant.as<decltype(eeprom_config_t::watering_delay)>();
-        auto watering_threshold = watering_threshold_variant.as<decltype(eeprom_config_t::watering_threshold)>();
-        auto watering_time = watering_time_variant.as<decltype(eeprom_config_t::watering_time)>();
-        auto automatic_ota = automatic_ota_variant.as<decltype(eeprom_config_t::automatic_ota)>();
+          // Extract all the values
+          JsonVariant sleep_time_variant = jsonDoc[F("sleep_time")];
+          JsonVariant watering_delay_variant = jsonDoc[F("watering_delay")];
+          JsonVariant watering_threshold_variant = jsonDoc[F("watering_threshold")];
+          JsonVariant watering_time_variant = jsonDoc[F("watering_time")];
+          JsonVariant automatic_ota_variant = jsonDoc[F("automatic_ota")];
 
-        if (eeprom_config.magic_number == MAGIC_NUMBER) {
-          bool changed = eeprom_config.sleep_time != sleep_time ||
-            eeprom_config.watering_delay != watering_delay ||
-            eeprom_config.watering_threshold != watering_threshold ||
-            eeprom_config.watering_time != watering_time ||
-            eeprom_config.automatic_ota != automatic_ota;
+          // Read the values if they were provided
+          // TODO: Take a mutex before writing to the EEPROM values
+          bool changed = false;
+          if (!sleep_time_variant.isNull()) {
+            auto sleep_time = sleep_time_variant.as<decltype(eeprom_config_t::sleep_time)>();
+            if (eeprom_config.sleep_time != sleep_time) {
+              changed = true;
+              eeprom_config.sleep_time = sleep_time;
+            }
+          }
 
-          // TODO: Take a mutex
+          if (!watering_delay_variant.isNull()) {
+            auto watering_delay = watering_delay_variant.as<decltype(eeprom_config_t::watering_delay)>();
+            if (eeprom_config.watering_delay != watering_delay) {
+              changed = true;
+              eeprom_config.watering_delay = watering_delay;
+            }
+          }
+
+          if (!watering_threshold_variant.isNull()) {
+            auto watering_threshold = watering_threshold_variant.as<decltype(eeprom_config_t::watering_threshold)>();
+            if (eeprom_config.watering_threshold != watering_threshold) {
+              changed = true;
+              eeprom_config.watering_threshold = watering_threshold;
+            }
+          }
+
+          if (!watering_time_variant.isNull()) {
+            auto watering_time = watering_time_variant.as<decltype(eeprom_config_t::watering_time)>();
+            if (eeprom_config.watering_time != watering_time) {
+              changed = true;
+              eeprom_config.watering_time = watering_time;
+            }
+          }
+
+          if (!automatic_ota_variant.isNull()) {
+            auto automatic_ota = automatic_ota_variant.as<decltype(eeprom_config_t::automatic_ota)>();
+            if (eeprom_config.automatic_ota != automatic_ota) {
+              changed = true;
+              eeprom_config.automatic_ota = automatic_ota;
+            }
+          }
+
           if (changed) {
-            eeprom_config.sleep_time = sleep_time;
-            eeprom_config.watering_delay = watering_delay;
-            eeprom_config.watering_threshold = watering_threshold;
-            eeprom_config.watering_time = watering_time;
-            eeprom_config.automatic_ota = automatic_ota;
-
             Serial.println(F("Received new MQTT config"));
             printEEPROMConfig(&eeprom_config);
 
