@@ -1,4 +1,4 @@
-name: Plant Watering ESP8266 CI
+name: Plant Friends CI
 
 on: [push, pull_request]
 
@@ -25,13 +25,13 @@ jobs:
 
         # Build firmware and file system images
         pio run
-        cp -v .pio/build/esp12e/firmware.bin binaries/PlantWateringESP8266.bin
+        cp -v .pio/build/esp12e/firmware.bin binaries/PlantFriends_firmware.bin
         pio run -t buildfs
-        cp -v .pio/build/esp12e/spiffs.bin binaries/
+        cp -v .pio/build/esp12e/spiffs.bin binaries/PlantFriends_spiffs.bin
 
         # Calculate the checksum
         pushd binaries
-        sha256sum * > SHA256SUMS
+        md5sum * > MD5SUMS
         popd
     - uses: actions/upload-artifact@v1
       with:

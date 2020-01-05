@@ -69,7 +69,14 @@
                 <input type="text" name="watering_time" value="%watering_time%">
             </div>
         </fieldset>
-        <div class="pure-controls"><button type="submit" class="pure-button pure-button-primary">Submit</button></div>
+        <div class="pure-controls">
+            <label for="automatic_ota" class="pure-checkbox">
+                <input id="automatic_ota" type="checkbox" name="automatic_ota" style="float: left;margin: 1px 5px 0 0;" %automatic_ota%>
+                Enable automatic updates?
+            </label>
+
+            <button type="submit" class="pure-button pure-button-primary">Submit</button>
+        </div>
     </form>
 </body>
 

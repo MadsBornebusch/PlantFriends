@@ -2,8 +2,10 @@
 #include <AsyncMqttClient.h>
 #include <ESPAsyncWebServer.h>
 #include <EEPROM.h>
+#include <ESP8266httpUpdate.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WiFi.h>
+#include "WiFiClientSecure.h"
 
 #include "AsyncElegantOtaSpiffs.h"
 #include "secret.h"
@@ -11,7 +13,7 @@
 #define SW_VERSION "1.0.0"
 
 // Define the access point SSID and password
-#define WIFI_AP_SSID "PlantWateringESP8266"
+#define WIFI_AP_SSID "PlantFriends"
 #define WIFI_AP_PASSWORD "plantsarecool"
 
 // Default sleep time in minutes
@@ -76,6 +78,7 @@ typedef struct {
   uint16_t watering_delay;
   uint16_t watering_threshold;
   uint8_t watering_time;
+  bool automatic_ota; // Flag used to enable automatic OTA
   bool override_retained_config_topic; // Used to override the retained config topic, so the values set via the web interface does not get overriden
 } eeprom_config_t;
 
@@ -83,16 +86,17 @@ typedef struct {
   uint64_t magic_number; // Used to determine if the RTC memory has been configured or not
   uint8_t sleep_num; // Stores the current sleep interval number
   uint8_t watering_delay_cycles; // Stores the number of cycles the board must sleep before it will water the plant again
+  uint16_t firmware_update_counter; // Used to only check for updates every 24 hrs
 } __attribute__ ((packed, aligned(4))) sleep_data_t; // The struct needs to be 4-byte aligned in the RTC memory
 
 // Wifi
-WiFiClient client;
+WiFiClientSecure client;
 //#define WIFI_SSID "YourWifiSSID" // Defined in secret.h
 //#define WIFI_PASSWORD "YourWifiPassword" // Defined in secret.h
 
 // MQTT
 AsyncMqttClient mqttClient;
-//#define MQTT_HOST IPAddress(192, 168, 1, 10) // Defined in secret.h
+//#define MQTT_HOST "192.168.1.10" // Defined in secret.h
 //#define MQTT_PORT 1883 // Defined in secret.h
 //#define MQTT_USERNAME "" // Defined in secret.h
 //#define MQTT_PASSWORD "" // Defined in secret.h
@@ -156,10 +160,15 @@ static void handleLongSleep(sleep_data_t *sleep_data) {
     sleep_data->magic_number = MAGIC_NUMBER;
     sleep_data->sleep_num = 1;
     sleep_data->watering_delay_cycles = 1;
+    sleep_data->firmware_update_counter = 0;
+  } else {
+    // We just woke up, so increment the counter
+    sleep_data->firmware_update_counter++;
   }
 
   Serial.print(F("Sleep number: ")); Serial.print(sleep_data->sleep_num);
-  Serial.print(F(", watering delay cycles: ")); Serial.println(sleep_data->watering_delay_cycles);
+  Serial.print(F(", watering delay cycles: ")); Serial.print(sleep_data->watering_delay_cycles);
+  Serial.print(F(", firmware update counter: ")); Serial.println(sleep_data->firmware_update_counter);
 
   // Check if we should go back to sleep immediately
   if (--sleep_data->sleep_num != 0) {
@@ -261,9 +270,9 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   IPAddress ip = WiFi.softAPIP();
   Serial.print(F("AP IP address: ")); Serial.println(ip);
 
-  MDNS.begin(F("plantwateringesp8266"));
+  MDNS.begin(F("plantfriends"));
   MDNS.addService(F("http"), F("tcp"), 80);
-  Serial.println(F("Hostname: http://plantwateringesp8266.local"));
+  Serial.println(F("Hostname: http://plantfriends.local"));
 
   if (!SPIFFS.begin()) {
     Serial.println(F("An Error has occurred while mounting SPIFFS! Rebooting..."));
@@ -310,7 +319,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_threshold : DEFAULT_WATERING_THRESHOLD);
       else if (var == F("watering_time"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_time : DEFAULT_WATERING_TIME);
-
+      else if (var == F("automatic_ota"))
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? (eeprom_config->automatic_ota ? "checked" : "") : "checked");
       return String();
     };
 
@@ -357,11 +367,13 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     decltype(eeprom_config_t::watering_delay) watering_delay = request->arg(F("watering_delay")).toInt();
     decltype(eeprom_config_t::watering_threshold) watering_threshold = request->arg(F("watering_threshold")).toInt();
     decltype(eeprom_config_t::watering_time) watering_time = request->arg(F("watering_time")).toInt();
+    decltype(eeprom_config_t::automatic_ota) automatic_ota = request->hasArg(F("automatic_ota")); // The argument is only present when the checkbox is checked
 
     bool changed = eeprom_config->sleep_time != sleep_time ||
       eeprom_config->watering_delay != watering_delay ||
       eeprom_config->watering_threshold != watering_threshold ||
-      eeprom_config->watering_time != watering_time;
+      eeprom_config->watering_time != watering_time ||
+      eeprom_config->automatic_ota != automatic_ota;
 
     // Check if the values has changed
     if (changed) {
@@ -370,6 +382,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       eeprom_config->watering_delay = watering_delay;
       eeprom_config->watering_threshold = watering_threshold;
       eeprom_config->watering_time = watering_time;
+      eeprom_config->automatic_ota = automatic_ota;
     }
     // The values where succesfully configured
     eeprom_config->magic_number = MAGIC_NUMBER;
@@ -428,9 +441,10 @@ static void printEEPROMConfig(const eeprom_config_t *eeprom_config) {
   Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
     eeprom_config->mqtt_host, eeprom_config->mqtt_port,
     eeprom_config->mqtt_username, eeprom_config->mqtt_base_topic);
-  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold: %u, watering time: %u\n",
+  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold: %u, watering time: %u, automatic ota: %u\n",
     eeprom_config->sleep_time, eeprom_config->watering_delay,
-    eeprom_config->watering_threshold, eeprom_config->watering_time);
+    eeprom_config->watering_threshold, eeprom_config->watering_time,
+    eeprom_config->automatic_ota);
 }
 
 void setup() {
@@ -451,6 +465,7 @@ void setup() {
   // as it will simply just transmit the values directly to itself
   Serial.begin(115200);
   Serial.println(F("\nBooting"));
+  Serial.printf("Firmware version: %s\n", SW_VERSION);
   Serial.flush();
 
   // Make sure Wifi is off
@@ -541,46 +556,67 @@ void setup() {
     });
     mqttClient.onMessage([&config_topic, &eeprom_config](char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
       if (config_topic == topic) {
-        StaticJsonDocument<JSON_OBJECT_SIZE(4)> jsonDoc; // Create a document with room for the four objects
-        DeserializationError error = deserializeJson(jsonDoc, payload);
-        if (error) { // Test if parsing succeeds
-          Serial.print(F("deserializeJson() failed: ")); Serial.println(error.c_str());
-          serializeJson(jsonDoc, Serial);
-          Serial.println();
-          return;
-        }
-
-        JsonVariant sleep_time_variant = jsonDoc[F("sleep_time")];
-        JsonVariant watering_delay_variant = jsonDoc[F("watering_delay")];
-        JsonVariant watering_threshold_variant = jsonDoc[F("watering_threshold")];
-        JsonVariant watering_time_variant = jsonDoc[F("watering_time")];
-
-        if (sleep_time_variant.isNull() || watering_delay_variant.isNull() ||
-          watering_threshold_variant.isNull() || watering_time_variant.isNull()) {
-            Serial.print(F("The JSON payload does not contain all the keys: ")); serializeJson(jsonDoc, Serial);
+        if (eeprom_config.magic_number == MAGIC_NUMBER) {
+          StaticJsonDocument<JSON_OBJECT_SIZE(5)> jsonDoc; // Create a document with room for the five objects
+          DeserializationError error = deserializeJson(jsonDoc, payload);
+          if (error) { // Test if parsing succeeds
+            Serial.print(F("deserializeJson() failed: ")); Serial.println(error.c_str());
+            serializeJson(jsonDoc, Serial);
             Serial.println();
             return;
-        }
+          }
 
-        // Read the values
-        auto sleep_time = sleep_time_variant.as<decltype(eeprom_config_t::sleep_time)>();
-        auto watering_delay = watering_delay_variant.as<decltype(eeprom_config_t::watering_delay)>();
-        auto watering_threshold = watering_threshold_variant.as<decltype(eeprom_config_t::watering_threshold)>();
-        auto watering_time = watering_time_variant.as<decltype(eeprom_config_t::watering_time)>();
+          // Extract all the values
+          JsonVariant sleep_time_variant = jsonDoc[F("sleep_time")];
+          JsonVariant watering_delay_variant = jsonDoc[F("watering_delay")];
+          JsonVariant watering_threshold_variant = jsonDoc[F("watering_threshold")];
+          JsonVariant watering_time_variant = jsonDoc[F("watering_time")];
+          JsonVariant automatic_ota_variant = jsonDoc[F("automatic_ota")];
 
-        if (eeprom_config.magic_number == MAGIC_NUMBER) {
-          bool changed = eeprom_config.sleep_time != sleep_time ||
-            eeprom_config.watering_delay != watering_delay ||
-            eeprom_config.watering_threshold != watering_threshold ||
-            eeprom_config.watering_time != watering_time;
+          // Read the values if they were provided
+          // TODO: Take a mutex before writing to the EEPROM values
+          bool changed = false;
+          if (!sleep_time_variant.isNull()) {
+            auto sleep_time = sleep_time_variant.as<decltype(eeprom_config_t::sleep_time)>();
+            if (eeprom_config.sleep_time != sleep_time) {
+              changed = true;
+              eeprom_config.sleep_time = sleep_time;
+            }
+          }
 
-          // TODO: Take a mutex
+          if (!watering_delay_variant.isNull()) {
+            auto watering_delay = watering_delay_variant.as<decltype(eeprom_config_t::watering_delay)>();
+            if (eeprom_config.watering_delay != watering_delay) {
+              changed = true;
+              eeprom_config.watering_delay = watering_delay;
+            }
+          }
+
+          if (!watering_threshold_variant.isNull()) {
+            auto watering_threshold = watering_threshold_variant.as<decltype(eeprom_config_t::watering_threshold)>();
+            if (eeprom_config.watering_threshold != watering_threshold) {
+              changed = true;
+              eeprom_config.watering_threshold = watering_threshold;
+            }
+          }
+
+          if (!watering_time_variant.isNull()) {
+            auto watering_time = watering_time_variant.as<decltype(eeprom_config_t::watering_time)>();
+            if (eeprom_config.watering_time != watering_time) {
+              changed = true;
+              eeprom_config.watering_time = watering_time;
+            }
+          }
+
+          if (!automatic_ota_variant.isNull()) {
+            auto automatic_ota = automatic_ota_variant.as<decltype(eeprom_config_t::automatic_ota)>();
+            if (eeprom_config.automatic_ota != automatic_ota) {
+              changed = true;
+              eeprom_config.automatic_ota = automatic_ota;
+            }
+          }
+
           if (changed) {
-            eeprom_config.sleep_time = sleep_time;
-            eeprom_config.watering_delay = watering_delay;
-            eeprom_config.watering_threshold = watering_threshold;
-            eeprom_config.watering_time = watering_time;
-
             Serial.println(F("Received new MQTT config"));
             printEEPROMConfig(&eeprom_config);
 
@@ -629,6 +665,7 @@ void setup() {
         jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
         jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
         jsonDoc[F("watering_time")] = eeprom_config.watering_time;
+        jsonDoc[F("automatic_ota")] = eeprom_config.automatic_ota;
 
         size_t n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
         if (mqttPublishBlocking(config_topic, jsonBuffer, n, true, 5 * 10)) {
@@ -695,8 +732,10 @@ void setup() {
       jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
       jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
       jsonDoc[F("watering_time")] = eeprom_config.watering_time;
+      jsonDoc[F("automatic_ota")] = eeprom_config.automatic_ota;
       jsonDoc[F("sleep_num")] = sleep_data.sleep_num;
       jsonDoc[F("watering_delay_cycles")] = sleep_data.watering_delay_cycles;
+      jsonDoc[F("firmware_update_counter")] = sleep_data.firmware_update_counter;
       jsonDoc[F("version")] = SW_VERSION;
 
       n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
@@ -737,23 +776,101 @@ void setup() {
   }
 #endif
 
-/*
-  #include <ESP8266httpUpdate.h>
-  ESPhttpUpdate.setLedPin(LED_PIN);
-  ESPhttpUpdate.rebootOnUpdate(true);
-  t_httpUpdate_return ret = ESPhttpUpdate.update(client, "192.168.0.115", 80, "/esp/update/arduino.php", "optional current version string here");
-  switch(ret) {
-      case HTTP_UPDATE_FAILED:
-          Serial.printf("[Firmware] HTTP_UPDATE_FAILED Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
-          break;
-      case HTTP_UPDATE_NO_UPDATES:
-          Serial.println("[Firmware] HTTP_UPDATE_NO_UPDATES\n");
-          break;
-      case HTTP_UPDATE_OK:
-          Serial.println("[Firmware] HTTP_UPDATE_OK\n");
-          break;
+  bool ota_reboot = false; // We will handle the OTA reboot manually, as we need to save the EEPROM values first
+  if (eeprom_config.automatic_ota && sleep_data.firmware_update_counter >= 24U * 60U / SLEEP_INTERVAL) { // Only check for updates every 24 hrs
+    sleep_data.firmware_update_counter = 0;
+
+    // The LED will be on during download of one buffer of data from the network. The LED will
+    // be off during writing that buffer to flash
+    // On a good connection the LED should flash regularly. On a bad connection the LED will be
+    // on much longer than it will be off.
+    ESPhttpUpdate.setLedPin(LED_PIN, LOW);
+
+    // Set time via NTP, as required for x.509 validation
+    auto setClock = [](int timeout = 5 * 2) { // Use a default timeout of 5 seconds
+      Serial.println(F("Setting time using SNTP"));
+      configTime(0U * 3600U, 0, "pool.ntp.org", "time.nist.gov");
+
+      Serial.print(F("Waiting for NTP time sync"));
+      time_t now = time(nullptr);
+      while (now < 8 * 3600 * 2 && timeout-- > 0) {
+        delay(500);
+        Serial.print(F("."));
+        now = time(nullptr);
+      }
+      Serial.println();
+      if (timeout == 0) // Checkout if there was a timeout
+        return false;
+      struct tm timeinfo;
+      gmtime_r(&now, &timeinfo);
+      Serial.print(F("Current time: "));
+      Serial.print(asctime(&timeinfo)); // Note "asctime" includes a '\n' character
+      return true;
+    };
+
+    if (setClock()) {
+      // Add Let's Encrypt as a trusted CA
+      static const char digicert[] PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIEkjCCA3qgAwIBAgIQCgFBQgAAAVOFc2oLheynCDANBgkqhkiG9w0BAQsFADA/
+MSQwIgYDVQQKExtEaWdpdGFsIFNpZ25hdHVyZSBUcnVzdCBDby4xFzAVBgNVBAMT
+DkRTVCBSb290IENBIFgzMB4XDTE2MDMxNzE2NDA0NloXDTIxMDMxNzE2NDA0Nlow
+SjELMAkGA1UEBhMCVVMxFjAUBgNVBAoTDUxldCdzIEVuY3J5cHQxIzAhBgNVBAMT
+GkxldCdzIEVuY3J5cHQgQXV0aG9yaXR5IFgzMIIBIjANBgkqhkiG9w0BAQEFAAOC
+AQ8AMIIBCgKCAQEAnNMM8FrlLke3cl03g7NoYzDq1zUmGSXhvb418XCSL7e4S0EF
+q6meNQhY7LEqxGiHC6PjdeTm86dicbp5gWAf15Gan/PQeGdxyGkOlZHP/uaZ6WA8
+SMx+yk13EiSdRxta67nsHjcAHJyse6cF6s5K671B5TaYucv9bTyWaN8jKkKQDIZ0
+Z8h/pZq4UmEUEz9l6YKHy9v6Dlb2honzhT+Xhq+w3Brvaw2VFn3EK6BlspkENnWA
+a6xK8xuQSXgvopZPKiAlKQTGdMDQMc2PMTiVFrqoM7hD8bEfwzB/onkxEz0tNvjj
+/PIzark5McWvxI0NHWQWM6r6hCm21AvA2H3DkwIDAQABo4IBfTCCAXkwEgYDVR0T
+AQH/BAgwBgEB/wIBADAOBgNVHQ8BAf8EBAMCAYYwfwYIKwYBBQUHAQEEczBxMDIG
+CCsGAQUFBzABhiZodHRwOi8vaXNyZy50cnVzdGlkLm9jc3AuaWRlbnRydXN0LmNv
+bTA7BggrBgEFBQcwAoYvaHR0cDovL2FwcHMuaWRlbnRydXN0LmNvbS9yb290cy9k
+c3Ryb290Y2F4My5wN2MwHwYDVR0jBBgwFoAUxKexpHsscfrb4UuQdf/EFWCFiRAw
+VAYDVR0gBE0wSzAIBgZngQwBAgEwPwYLKwYBBAGC3xMBAQEwMDAuBggrBgEFBQcC
+ARYiaHR0cDovL2Nwcy5yb290LXgxLmxldHNlbmNyeXB0Lm9yZzA8BgNVHR8ENTAz
+MDGgL6AthitodHRwOi8vY3JsLmlkZW50cnVzdC5jb20vRFNUUk9PVENBWDNDUkwu
+Y3JsMB0GA1UdDgQWBBSoSmpjBH3duubRObemRWXv86jsoTANBgkqhkiG9w0BAQsF
+AAOCAQEA3TPXEfNjWDjdGBX7CVW+dla5cEilaUcne8IkCJLxWh9KEik3JHRRHGJo
+uM2VcGfl96S8TihRzZvoroed6ti6WqEBmtzw3Wodatg+VyOeph4EYpr/1wXKtx8/
+wApIvJSwtmVi4MFU5aMqrSDE6ea73Mj2tcMyo5jMd6jmeWUHK8so/joWUoHOUgwu
+X4Po1QYz+3dszkDqMp4fklxBwXRsW10KXzPMTZ+sOPAveyxindmjkW8lGy+QsRlG
+PfZ+G6Z6h7mjem0Y+iWlkYcV4PIWL1iwBi8saCbGS5jN2p8M+X+Q7UNKEkROb3N6
+KOqkqm57TH2H3eDJAkSnh6/DNFu0Qg==
+-----END CERTIFICATE-----
+)EOF";
+      X509List cert(digicert);
+      client.setTrustAnchors(&cert);
+
+      // The source code for the update server is available at: https://github.com/Lauszus/PlantFriendsApp
+      String url = F("https://plant.lauszus.com/update");
+
+      // Lambda function for printing the HTTP update return value
+      auto http_update_status = [](t_httpUpdate_return ret) {
+        switch (ret) {
+          case HTTP_UPDATE_FAILED:
+            Serial.printf("HTTP Update Failed - Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+            break;
+          case HTTP_UPDATE_NO_UPDATES:
+            Serial.printf("%s is already the newest version available\n", SW_VERSION);
+            break;
+          case HTTP_UPDATE_OK:
+            break;
+        }
+      };
+
+      Serial.println(F("Checking for SPIFFS update"));
+      ESPhttpUpdate.rebootOnUpdate(false); // Do not reboot after flashing. We will handle it manually instead
+      t_httpUpdate_return ret = ESPhttpUpdate.updateSpiffs(client, url, SW_VERSION);
+      if (ret == HTTP_UPDATE_OK) {
+        Serial.println(F("Updating firmware..."));
+        ret = ESPhttpUpdate.update(client, url, SW_VERSION);
+        ota_reboot = ret == HTTP_UPDATE_OK; // Reboot if the update was successful
+        http_update_status(ret);
+      } else
+        http_update_status(ret);
+    }
   }
-*/
 
   // Replace values in RAM with the modified values
   // This does NOT make any changes to flash, all data is still in RAM
@@ -761,6 +878,15 @@ void setup() {
 
   // Stop the EEPROM emulation and transfer all the data that might have been update from RAM to flash
   EEPROM.end();
+
+  if (ota_reboot) {
+    // Write the sleep data manually, as we will be doing a software reset
+    if (!ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR, (uint32_t*)&sleep_data, sizeof(sleep_data_t)))
+      Serial.println(F("Failed to write RTC user memory"));
+    Serial.println(F("OTA was successful. Rebooting..."));
+    Serial.flush();
+    ESP.restart();
+  }
 
   Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config.sleep_time); Serial.println(F(" min"));
 
