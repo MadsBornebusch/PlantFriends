@@ -11,6 +11,16 @@ This is a plant watering ESP8266.
 
 TODO: Add picture of a plant here
 
+# Features
+
+* Fully open source (software and hardware)
+* Automatic OTA update via Github release - enable/disable using checkbox
+* OTA updates via a web interface
+* Works with any MQTT server
+* Works with Home Assistant discovery
+* Set the sleep time, watering delay, water threshold, water time etc via MQTT
+* Works with ThingSpeak
+
 # PCB
 
 TODO: Add picture of the PCB here
@@ -190,35 +200,4 @@ The plant will now show up in the Home Assistant overview like so:
 
 # ThingSpeak
 
-TOOD: Add guide
-
-# TODO lists
-
-## TODO
-
-- [x] Add Kicad PCB project
-- [x] Add some form of license
-
-## TODO code
-
-- [x] [OTA update via http](https://arduino-esp8266.readthedocs.io/en/latest/ota_updates/readme.html#http-server)
-- [x] [Support Home Assistant discovery](https://www.home-assistant.io/docs/mqtt/discovery/)
-- [x] Make a struct for variables to save in RTC memory
-- [x] Set the sleep time, watering delay, water threshold and water time via MQTT
-- [x] Use MQTT for data
-- [x] Show MQTT data in Home Assistant
-- [x] OTA update via Github release - enable/disable using checkbox
-  - [x] Verify checksum of flashed binary
-  - [x] Only check for OTA update once per day (24 hr)
-- [ ] Send via MQTT when it watered the plant
-- [ ] [Support secure MQTT (SSL)](https://github.com/marvinroger/async-mqtt-client/blob/master/examples/FullyFeaturedSSL/src/main.cpp)
-
-## TODO code (low priority)
-
-- [ ] Try long sleeps and only wake rf on the last wakeup
-- [ ] Define for printing stuff to serial
-- [ ] Other ways to read soil moisture?
-- [ ] Check power consumption in sleep and awake
-- [ ] Header file with definitions?
-- [ ] Better structure: move functions out of main files
-- [ ] Read I2C sensors (such as BME environment sensors)
+TODO: Add guide
