@@ -1,4 +1,6 @@
-# Plant Friends
+<div align="center">
+  <img src="img/plant_friends_social.png">
+</div>
 
 The code is licensed under the GNU General Public License Version 3.
 
