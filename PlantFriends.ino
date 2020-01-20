@@ -121,14 +121,14 @@ static volatile uint32_t soil_timer;
 static volatile uint16 publishedPacketId = -1;
 
 /*
-long getMedian(long &array, uint8_t n){
+long getMedian(uint32_t *array, size_t n){
   //n = sizeof(array[0])/sizeof(array);
 
   // Sort array
-  for (int i = 0; i < n; i++){
-    for (int j = 0; j < n; j++){
+  for (size_t i = 0; i < n; i++){
+    for (size_t j = 0; j < n; j++){
       if (array[j] > array[i]){
-        int tmp = array[i];
+        uint32_t tmp = array[i];
         array[i] = array[j];
         array[j] = tmp;
       }
@@ -138,9 +138,9 @@ long getMedian(long &array, uint8_t n){
 }
 */
 
-static long getMean(int *array, uint8_t n) {
+static long getMean(uint32_t *array, size_t n) {
   long sum = 0;
-  for (uint8_t i = 0; i < n; i++)
+  for (size_t i = 0; i < n; i++)
     sum += array[i];
   return sum/n;
 }
@@ -206,12 +206,12 @@ static void ICACHE_RAM_ATTR soilInterrupt() {
   soil_timer_flag = true;
 }
 
-static bool readSoil(int *soil_measurements, uint8_t n_meas) {
+static bool readSoil(uint32_t *soil_measurements, size_t n_meas) {
   pinMode(SOIL_OUT, OUTPUT);
   pinMode(SOIL_IN, INPUT);
 
   bool result = true;
-  for (uint8_t i = 0; i < n_meas; i++) {
+  for (size_t i = 0; i < n_meas; i++) {
     Serial.print(i); Serial.print(": ");
     digitalWrite(SOIL_OUT, LOW);
     delay(10); // Wait for the voltage to drop
@@ -501,14 +501,14 @@ void setup() {
   blinkLED();
 
   // Read soil moisture
-  int soil_measurements[N_SOIL_MEAS];
+  uint32_t soil_measurements[N_SOIL_MEAS];
   if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
     Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
     delay(5000);
     ESP.restart();
   }
   Serial.println(F("Read soil moisture"));
-  int soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+  uint32_t soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
   Serial.print(F("Successfully found soil moisture: ")); Serial.println(soil_moisture);
 
   // Water plant
