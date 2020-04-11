@@ -22,6 +22,7 @@ TODO: Add picture of a plant here
 * Works with Home Assistant discovery
 * Set the sleep time, watering delay, water threshold, water time etc via MQTT
 * Works with ThingSpeak
+* Temperature, pressure and humidity using BME280
 
 # PCB
 
@@ -179,22 +180,26 @@ Now add the following to your `automations.yaml` file:
 
 This makes sure that the MQTT config topic is updated when the slider is moved and that the slider is always set to the MQTT config topic when it changes.
 
-Finally you can add the two sensors and the inputs slider into on group by adding the following to `groups.yaml`:
+Finally you can add the sensors and the inputs slider into on group by adding the following to `groups.yaml`:
 
 ```yaml
 office_plant:
     name: "Office Plant"
     icon: mdi:sprout
-    control: hidden
     entities:
     - sensor.office_soil_moisture
     - sensor.office_voltage
+    - sensor.office_temperature
+    - sensor.office_pressure
+    - sensor.office_humidity
     - input_number.office_sleep_time
     - input_number.office_watering_delay
     - input_number.office_watering_threshold
     - input_number.office_watering_time
     - input_number.office_automatic_ota
 ```
+
+Note that the `temperature`, `pressure` and `humidity` sensors are only available if a BME280 is connected.
 
 The plant will now show up in the Home Assistant overview like so:
 
