@@ -1,3 +1,4 @@
+#include <Adafruit_BME280.h>
 #include <ArduinoJson.h>
 #include <AsyncMqttClient.h>
 #include <ESPAsyncWebServer.h>
@@ -119,6 +120,9 @@ static volatile uint32_t soil_timer;
 
 // Used to check if a MQTT package was succesfully sent
 static volatile uint16 publishedPacketId = -1;
+
+// BME280 sensor
+Adafruit_BME280 bme280; // Connect to the BME280 via I2C
 
 /*
 long getMedian(uint32_t *array, size_t n){
@@ -524,6 +528,30 @@ void setup() {
   } else if (sleep_data.watering_delay_cycles > 1)
     sleep_data.watering_delay_cycles--;
 
+  // The SCL and SDA pins are accidently swapped compared to the BME280 breakout
+  Wire.pins(SCL, SDA);
+
+  // Read BME280 if available
+  float temperature = NAN, pressure = NAN, humidity = NAN;
+  if (bme280.begin(BME280_ADDRESS_ALTERNATE)) {
+    Serial.println(F("Found BME280"));
+
+    // Use the highest values, as it will go to sleep when we are done anyway
+    bme280.setSampling(Adafruit_BME280::MODE_FORCED,  // Trigger a reading manually
+                       Adafruit_BME280::SAMPLING_X16, // Temperature
+                       Adafruit_BME280::SAMPLING_X16, // Pressure
+                       Adafruit_BME280::SAMPLING_X16, // Humidity
+                       Adafruit_BME280::FILTER_X16);  // Use the IIR filter
+
+    // Take the measurement
+    bme280.takeForcedMeasurement();
+    temperature = bme280.readTemperature(); // C
+    pressure = bme280.readPressure() / 100.0f; // hPa
+    humidity = bme280.readHumidity(); // %
+    Serial.printf("Temperature: %.1f C, pressure: %.1f hPa, humidity: %.1f %%\n", temperature, pressure, humidity);
+  } else
+    Serial.println(F("BME280 is not available"));
+
   // Connect to Wifi
   WiFi.mode(WIFI_STA);
   WiFi.begin(eeprom_config.wifi_ssid, eeprom_config.wifi_password);
@@ -679,7 +707,9 @@ void setup() {
         Serial.printf("Subscribed to topic \"%s\", QoS 0, packetId: %u\n", config_topic.c_str(), packetIdSub);
       }
 
-      // Send messsages, so the sensor is auto discovered by Home Assistant - see: https://www.home-assistant.io/docs/mqtt/discovery/
+      // Send messsages, so the sensors are auto discovered by Home Assistant - see: https://www.home-assistant.io/docs/mqtt/discovery/
+
+      // Send the soil moisture "sensor"
       jsonDoc.clear(); // Make sure we start with a blank document
       jsonDoc[F("name")] = name + F(" Soil Moisture");
       jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
@@ -702,7 +732,7 @@ void setup() {
       else
         Serial.println(F("Failed to send soil moisture discovery message due to timeout"));
 
-      // Send the voltage "sensor" as well
+      // Send the voltage "sensor"
       jsonDoc.clear(); // Make sure we start with a blank document
       jsonDoc[F("name")] = name + F(" Voltage");
       jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
@@ -725,9 +755,94 @@ void setup() {
       else
         Serial.println(F("Failed to send voltage discovery message due to timeout"));
 
+      // Send the temperature "sensor" if available
+      if (!isnan(temperature)) {
+        jsonDoc.clear(); // Make sure we start with a blank document
+        jsonDoc[F("name")] = name + F(" Temperature");
+        jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+        jsonDoc[F("stat_t")] = F("~/state");
+        jsonDoc[F("json_attr_t")] = F("~/state");
+        jsonDoc[F("val_tpl")] = F("{{value_json.temperature}}");
+        jsonDoc[F("unit_of_meas")] = F("C");
+        jsonDoc[F("ic")] = F("mdi:thermometer");
+        jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
+        jsonDoc[F("uniq_id")] = String(chip_id) + F("_temperature");
+
+        // Set device information used for the device registry
+        jsonDoc[F("device")][F("name")] = name + F(" Plant");
+        jsonDoc[F("device")][F("sw")] = SW_VERSION;
+        jsonDoc[F("device")].createNestedArray(F("ids")).add(String(chip_id));
+
+        n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+        if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("T/config"), jsonBuffer, n, true, 5 * 10))
+          Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
+        else
+          Serial.println(F("Failed to send temperature discovery message due to timeout"));
+      }
+
+      // Send the pressure "sensor" if available
+      if (!isnan(pressure)) {
+        jsonDoc.clear(); // Make sure we start with a blank document
+        jsonDoc[F("name")] = name + F(" Pressure");
+        jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+        jsonDoc[F("stat_t")] = F("~/state");
+        jsonDoc[F("json_attr_t")] = F("~/state");
+        jsonDoc[F("val_tpl")] = F("{{value_json.pressure}}");
+        jsonDoc[F("unit_of_meas")] = F("hPa");
+        jsonDoc[F("ic")] = F("mdi:gauge");
+        jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
+        jsonDoc[F("uniq_id")] = String(chip_id) + F("_pressure");
+
+        // Set device information used for the device registry
+        jsonDoc[F("device")][F("name")] = name + F(" Plant");
+        jsonDoc[F("device")][F("sw")] = SW_VERSION;
+        jsonDoc[F("device")].createNestedArray(F("ids")).add(String(chip_id));
+
+        n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+        if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("P/config"), jsonBuffer, n, true, 5 * 10))
+          Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
+        else
+          Serial.println(F("Failed to send pressure discovery message due to timeout"));
+      }
+
+      // Send the humidity "sensor" if available
+      if (!isnan(humidity)) {
+        jsonDoc.clear(); // Make sure we start with a blank document
+        jsonDoc[F("name")] = name + F(" Humidity");
+        jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+        jsonDoc[F("stat_t")] = F("~/state");
+        jsonDoc[F("json_attr_t")] = F("~/state");
+        jsonDoc[F("val_tpl")] = F("{{value_json.humidity}}");
+        jsonDoc[F("unit_of_meas")] = F("%");
+        jsonDoc[F("ic")] = F("mdi:water-percent");
+        jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
+        jsonDoc[F("uniq_id")] = String(chip_id) + F("_humidity");
+
+        // Set device information used for the device registry
+        jsonDoc[F("device")][F("name")] = name + F(" Plant");
+        jsonDoc[F("device")][F("sw")] = SW_VERSION;
+        jsonDoc[F("device")].createNestedArray(F("ids")).add(String(chip_id));
+
+        n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+        if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("H/config"), jsonBuffer, n, true, 5 * 10))
+          Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
+        else
+          Serial.println(F("Failed to send humidity discovery message due to timeout"));
+      }
+
       jsonDoc.clear(); // Make sure we start with a blank document
+
+      // Measurements
       jsonDoc[F("soil_moisture")] = soil_moisture;
-      jsonDoc[F("voltage")] = voltage / 1000.0f;
+      jsonDoc[F("voltage")] = String(voltage / 1000.0f, 2); // Round to 2 decimals
+      if (!isnan(temperature))
+        jsonDoc[F("temperature")] = String(temperature, 1); // Round to 1 decimals
+      if (!isnan(pressure))
+        jsonDoc[F("pressure")] = String(pressure, 1); // Round to 1 decimals
+      if (!isnan(humidity))
+        jsonDoc[F("humidity")] = String(humidity, 0); // Round to 0 decimals
+
+      // Settings
       jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
       jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
       jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
