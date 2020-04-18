@@ -11,7 +11,7 @@
 #include "AsyncElegantOtaSpiffs.h"
 #include "secret.h"
 
-#define SW_VERSION "1.0.1"
+#define SW_VERSION "1.1.0"
 
 // Define the access point SSID and password
 #define WIFI_AP_SSID "PlantFriends"
