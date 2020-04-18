@@ -764,7 +764,7 @@ void setup() {
         jsonDoc[F("json_attr_t")] = F("~/state");
         jsonDoc[F("val_tpl")] = F("{{value_json.temperature}}");
         jsonDoc[F("unit_of_meas")] = F("C");
-        jsonDoc[F("ic")] = F("mdi:temperature-celsius");
+        jsonDoc[F("ic")] = F("mdi:thermometer");
         jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
         jsonDoc[F("uniq_id")] = String(chip_id) + F("_temperature");
 
@@ -834,13 +834,13 @@ void setup() {
 
       // Measurements
       jsonDoc[F("soil_moisture")] = soil_moisture;
-      jsonDoc[F("voltage")] = voltage / 1000.0f;
+      jsonDoc[F("voltage")] = String(voltage / 1000.0f, 2); // Round to 2 decimals
       if (!isnan(temperature))
-        jsonDoc[F("temperature")] = temperature;
+        jsonDoc[F("temperature")] = String(temperature, 1); // Round to 1 decimals
       if (!isnan(pressure))
-        jsonDoc[F("pressure")] = pressure;
+        jsonDoc[F("pressure")] = String(pressure, 1); // Round to 1 decimals
       if (!isnan(humidity))
-        jsonDoc[F("humidity")] = humidity;
+        jsonDoc[F("humidity")] = String(humidity, 0); // Round to 0 decimals
 
       // Settings
       jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
