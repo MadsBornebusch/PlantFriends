@@ -606,7 +606,7 @@ void setup() {
   float soil_moisture_pct = (float)((soil_moisture - eeprom_config.cal_dry) * 100) / (float)(eeprom_config.cal_wet-eeprom_config.cal_dry);
 
   // Water plant
-  if (soil_moisture <= eeprom_config.watering_threshold && sleep_data.watering_delay_cycles <= 1) {
+  if (soil_moisture_pct <= eeprom_config.watering_threshold_pct && sleep_data.watering_delay_cycles <= 1) {
     Serial.println(F("Watering plant!!"));
     pinMode(WATERING_OUT, OUTPUT);
     analogWrite(WATERING_OUT, 1023U * 3U / 4U);
