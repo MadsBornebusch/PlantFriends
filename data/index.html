@@ -65,9 +65,18 @@
                 <input type="text" name="watering_threshold" value="%watering_threshold%">
             </div>
             <div class="pure-control-group">
+                <label for="watering_threshold_pct">Watering threshold [%]</label>
+                <input type="text" name="watering_threshold_pct" value="%watering_threshold_pct%">
+            </div>
+            <div class="pure-control-group">
                 <label for="watering_time">Watering time [sec]</label>
                 <input type="text" name="watering_time" value="%watering_time%">
             </div>
+        </fieldset>
+        <br>
+        <a href="/cal">Calibrate soil moisture sensor</a>
+        <br>
+        <fieldset class="pure-group">
             <div class="pure-control-group">
                 <label for="cal_dry">Calibration value dry</label>
                 <input type="text" name="cal_dry" value="%cal_dry%">
@@ -77,8 +86,6 @@
                 <input type="text" name="cal_wet" value="%cal_wet%">
             </div>
         </fieldset>
-        <br>
-        <a href="/cal">Calibrate sensor</a>
         <br>
         <div class="pure-controls">
             <label for="automatic_ota" class="pure-checkbox">

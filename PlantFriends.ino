@@ -27,6 +27,9 @@
 // Default watering threshold in clock cycles
 #define DEFAULT_WATERING_THRESHOLD (3200U)
 
+// Default watering threshold in percent
+#define DEFAULT_WATERING_THRESHOLD_PCT (16.0)
+
 // Default watering time in seconds
 #define DEFAULT_WATERING_TIME (3U)
 
@@ -86,6 +89,7 @@ typedef struct {
   uint8_t sleep_time;
   uint16_t watering_delay;
   uint16_t watering_threshold;
+  float watering_threshold_pct;
   uint8_t watering_time;
   bool automatic_ota; // Flag used to enable automatic OTA
   bool override_retained_config_topic; // Used to override the retained config topic, so the values set via the web interface does not get overriden
@@ -369,6 +373,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_delay : DEFAULT_WATERING_DELAY);
       else if (var == F("watering_threshold"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_threshold : DEFAULT_WATERING_THRESHOLD);
+      else if (var == F("watering_threshold_pct"))
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_threshold_pct : DEFAULT_WATERING_THRESHOLD_PCT);
       else if (var == F("watering_time"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_time : DEFAULT_WATERING_TIME);
       else if (var == F("cal_dry"))
@@ -390,7 +396,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   });
 
   httpServer.on("/caldry", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_dry](AsyncWebServerRequest *request) {
-    uint32_t soil_moisture = readSoilMedian(N_SOIL_MEAS); // TODO change to N_SOIL_MEAS
+    uint32_t soil_moisture = readSoilMedian(N_SOIL_MEAS);
     auto processor = [&soil_moisture](const String &var) {
       if (var == F("cal_dry"))
         return String(soil_moisture);
@@ -401,7 +407,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   });
 
   httpServer.on("/calwet", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_wet](AsyncWebServerRequest *request) {
-    uint32_t soil_moisture = readSoilMedian(9); // TODO change to N_SOIL_MEAS
+    uint32_t soil_moisture = readSoilMedian(N_SOIL_MEAS);
     auto processor = [&soil_moisture](const String &var) {
       if (var == F("cal_wet"))
         return String(soil_moisture);
@@ -418,7 +424,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       || !request->hasArg(F("mqtt_host")) || !request->hasArg(F("mqtt_port"))
       || !request->hasArg(F("mqtt_username")) || !request->hasArg(F("mqtt_password")) || !request->hasArg(F("mqtt_base_topic"))
       || !request->hasArg(F("sleep_time")) || !request->hasArg(F("watering_delay"))
-      || !request->hasArg(F("watering_threshold")) || !request->hasArg(F("watering_time"))
+      || !request->hasArg(F("watering_threshold")) || !request->hasArg(F("watering_threshold_pct")) || !request->hasArg(F("watering_time"))
       || !request->hasArg(F("cal_dry")) || !request->hasArg(F("cal_wet")) ){
       request->send(400, F("text/plain"), F("400: Invalid request"));
       return;
@@ -450,6 +456,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     decltype(eeprom_config_t::sleep_time) sleep_time = request->arg(F("sleep_time")).toInt();
     decltype(eeprom_config_t::watering_delay) watering_delay = request->arg(F("watering_delay")).toInt();
     decltype(eeprom_config_t::watering_threshold) watering_threshold = request->arg(F("watering_threshold")).toInt();
+    decltype(eeprom_config_t::watering_threshold_pct) watering_threshold_pct = request->arg(F("watering_threshold_pct")).toFloat();
     decltype(eeprom_config_t::watering_time) watering_time = request->arg(F("watering_time")).toInt();
     decltype(eeprom_config_t::cal_dry) cal_dry = request->arg(F("cal_dry")).toInt();
     decltype(eeprom_config_t::cal_wet) cal_wet = request->arg(F("cal_wet")).toInt();
@@ -458,6 +465,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     bool changed = eeprom_config->sleep_time != sleep_time ||
       eeprom_config->watering_delay != watering_delay ||
       eeprom_config->watering_threshold != watering_threshold ||
+      eeprom_config->watering_threshold_pct != watering_threshold_pct ||
       eeprom_config->watering_time != watering_time ||
       eeprom_config->cal_dry != cal_dry ||
       eeprom_config->cal_wet != cal_wet ||
@@ -469,6 +477,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       eeprom_config->sleep_time = sleep_time;
       eeprom_config->watering_delay = watering_delay;
       eeprom_config->watering_threshold = watering_threshold;
+      eeprom_config->watering_threshold_pct = watering_threshold_pct;
       eeprom_config->watering_time = watering_time;
       eeprom_config->cal_dry = cal_dry;
       eeprom_config->cal_wet = cal_wet;
@@ -531,10 +540,10 @@ static void printEEPROMConfig(const eeprom_config_t *eeprom_config) {
   Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
     eeprom_config->mqtt_host, eeprom_config->mqtt_port,
     eeprom_config->mqtt_username, eeprom_config->mqtt_base_topic);
-  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold: %u, watering time: %u, automatic ota: %u\n",
+  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold: %u, watering threshold in percent: %.1f, watering time: %u, automatic ota: %u\n",
     eeprom_config->sleep_time, eeprom_config->watering_delay,
-    eeprom_config->watering_threshold, eeprom_config->watering_time,
-    eeprom_config->automatic_ota);
+    eeprom_config->watering_threshold, eeprom_config->watering_threshold_pct, 
+    eeprom_config->watering_time, eeprom_config->automatic_ota);
 }
 
 void setup() {
@@ -593,6 +602,8 @@ void setup() {
   // Read soil moisture
   uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
   Serial.print(F("Successfully found soil moisture: ")); Serial.println(soil_moisture);
+  // Calculate soil moisture percentage
+  float soil_moisture_pct = (float)((soil_moisture - eeprom_config.cal_dry) * 100) / (float)(eeprom_config.cal_wet-eeprom_config.cal_dry);
 
   // Water plant
   if (soil_moisture <= eeprom_config.watering_threshold && sleep_data.watering_delay_cycles <= 1) {
@@ -635,9 +646,10 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(eeprom_config.wifi_ssid, eeprom_config.wifi_password);
   if (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    Serial.println(F("Connection Failed! Rebooting..."));
-    delay(5000);
-    ESP.restart();
+    Serial.println(F("Connection Failed!"));
+    Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config.sleep_time); Serial.println(F(" min"));
+    // Go into long deep sleep
+    longSleep(&eeprom_config, &sleep_data);
   }
   Serial.println(F("Wifi connected"));
   Serial.print(F("IP address: "));
@@ -677,6 +689,7 @@ void setup() {
           JsonVariant sleep_time_variant = jsonDoc[F("sleep_time")];
           JsonVariant watering_delay_variant = jsonDoc[F("watering_delay")];
           JsonVariant watering_threshold_variant = jsonDoc[F("watering_threshold")];
+          JsonVariant watering_threshold_pct_variant = jsonDoc[F("watering_threshold_pct")];
           JsonVariant watering_time_variant = jsonDoc[F("watering_time")];
           JsonVariant automatic_ota_variant = jsonDoc[F("automatic_ota")];
 
@@ -704,6 +717,14 @@ void setup() {
             if (eeprom_config.watering_threshold != watering_threshold) {
               changed = true;
               eeprom_config.watering_threshold = watering_threshold;
+            }
+          }
+
+          if (!watering_threshold_pct_variant.isNull()) {
+            auto watering_threshold_pct = watering_threshold_pct_variant.as<decltype(eeprom_config_t::watering_threshold_pct)>();
+            if (eeprom_config.watering_threshold_pct != watering_threshold_pct) {
+              changed = true;
+              eeprom_config.watering_threshold_pct = watering_threshold_pct;
             }
           }
 
@@ -771,6 +792,7 @@ void setup() {
         jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
         jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
         jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
+        jsonDoc[F("watering_threshold_pct")] = eeprom_config.watering_threshold_pct;
         jsonDoc[F("watering_time")] = eeprom_config.watering_time;
         jsonDoc[F("automatic_ota")] = eeprom_config.automatic_ota;
 
@@ -810,6 +832,29 @@ void setup() {
         Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
       else
         Serial.println(F("Failed to send soil moisture discovery message due to timeout"));
+
+      // Send the soil moisture "sensor" in percent
+      jsonDoc.clear(); // Make sure we start with a blank document
+      jsonDoc[F("name")] = name + F(" Soil Moisture Pct");
+      jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+      jsonDoc[F("stat_t")] = F("~/state");
+      jsonDoc[F("json_attr_t")] = F("~/state");
+      jsonDoc[F("val_tpl")] = F("{{value_json.moisture_pct}}");
+      jsonDoc[F("unit_of_meas")] = F("%");
+      jsonDoc[F("ic")] = F("mdi:sprout");
+      jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
+      jsonDoc[F("uniq_id")] = String(chip_id) + F("_moisture_pct");
+
+      // Set device information used for the device registry
+      jsonDoc[F("device")][F("name")] = name + F(" Plant");
+      jsonDoc[F("device")][F("sw")] = SW_VERSION;
+      jsonDoc[F("device")].createNestedArray(F("ids")).add(String(chip_id));
+
+      n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+      if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("M/config"), jsonBuffer, n, true, 5 * 10))
+        Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
+      else
+        Serial.println(F("Failed to send soil moisture pct discovery message due to timeout"));
 
       // Send the voltage "sensor"
       jsonDoc.clear(); // Make sure we start with a blank document
@@ -913,6 +958,7 @@ void setup() {
 
       // Measurements
       jsonDoc[F("soil_moisture")] = soil_moisture;
+      jsonDoc[F("moisture_pct")] = String(soil_moisture_pct, 1); // Round to 1 decimal
       jsonDoc[F("voltage")] = String(voltage / 1000.0f, 2); // Round to 2 decimals
       if (!isnan(temperature))
         jsonDoc[F("temperature")] = String(temperature, 1); // Round to 1 decimals
@@ -925,6 +971,7 @@ void setup() {
       jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
       jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
       jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
+      jsonDoc[F("watering_threshold_pct")] = eeprom_config.watering_threshold_pct;
       jsonDoc[F("watering_time")] = eeprom_config.watering_time;
       jsonDoc[F("automatic_ota")] = eeprom_config.automatic_ota;
       jsonDoc[F("sleep_num")] = sleep_data.sleep_num;
