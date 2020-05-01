@@ -676,7 +676,7 @@ void setup() {
     mqttClient.onMessage([&config_topic, &eeprom_config](char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
       if (config_topic == topic) {
         if (eeprom_config.magic_number == MAGIC_NUMBER) {
-          StaticJsonDocument<JSON_OBJECT_SIZE(5)> jsonDoc; // Create a document with room for the five objects
+          StaticJsonDocument<JSON_OBJECT_SIZE(6)> jsonDoc; // Create a document with room for the six objects
           DeserializationError error = deserializeJson(jsonDoc, payload);
           if (error) { // Test if parsing succeeds
             Serial.print(F("deserializeJson() failed: ")); Serial.println(error.c_str());
