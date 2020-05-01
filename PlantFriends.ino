@@ -37,7 +37,7 @@
 #define DEFAULT_CALIBRATION_DRY (0U)
 
 // Define default calibration value for wet measurement
-#define DEFAULT_CALIBRATION_WET (10000U)
+#define DEFAULT_CALIBRATION_WET (20000U)
 
 // Sleep interval can safely be set from 1 to 30 minutes (possibly higher, but there is a limitation to sleep time with the esp8266). Should be smaller or equal to SLEEP_TIME
 #define SLEEP_INTERVAL (10U)
@@ -132,23 +132,37 @@ static volatile uint16 publishedPacketId = -1;
 // BME280 sensor
 Adafruit_BME280 bme280; // Connect to the BME280 via I2C
 
-/*
-long getMedian(uint32_t *array, size_t n){
-  //n = sizeof(array[0])/sizeof(array);
 
-  // Sort array
-  for (size_t i = 0; i < n; i++){
-    for (size_t j = 0; j < n; j++){
-      if (array[j] > array[i]){
-        uint32_t tmp = array[i];
-        array[i] = array[j];
-        array[j] = tmp;
+static void bubbleSort(uint32_t *array, size_t n) {
+  //size_t n = sizeof(array[0])/sizeof(array);
+  size_t new_n;
+  //unsigned long n=len;
+  uint32_t temp;
+   while(n > 1){
+    new_n=0;
+    for(size_t i = 1; i < n ; i++){
+      if(array[i-1]>array[i]){
+        temp=array[i];           //swap places in array
+        array[i]=array[i-1];
+        array[i-1]=temp;
+        new_n=i;
       }
-
-  for(i=0, i<sizeof(array[0])/sizeof(array), i++)
-
+    }
+    n=new_n;
+  }
 }
-*/
+
+static uint32_t getMedian(uint32_t *array, size_t n) {
+  // Sort array
+  bubbleSort(array, n);
+
+  if (n && 0x01){
+    // Number is uneven
+    return array[n/2];
+  }else{
+    return (array[n/2-1] + array[n/2])/2;
+  }
+}
 
 static long getMean(uint32_t *array, size_t n) {
   long sum = 0;
@@ -220,13 +234,15 @@ static void ICACHE_RAM_ATTR soilInterrupt() {
 
 static bool readSoil(uint32_t *soil_measurements, size_t n_meas) {
   pinMode(SOIL_OUT, OUTPUT);
-  pinMode(SOIL_IN, INPUT);
 
   bool result = true;
   for (size_t i = 0; i < n_meas; i++) {
     Serial.print(i); Serial.print(": ");
     digitalWrite(SOIL_OUT, LOW);
-    delay(10); // Wait for the voltage to drop
+    pinMode(SOIL_IN, OUTPUT);
+    digitalWrite(SOIL_IN, LOW);
+    delay(100); // Wait for the voltage to drop
+    pinMode(SOIL_IN, INPUT);
     attachInterrupt(digitalPinToInterrupt(SOIL_IN), soilInterrupt, RISING);
     soil_timer_flag = false; // Reset the flag used for telling when the interrupt has triggered
     uint32_t timer_start = ESP.getCycleCount(); // Reset the counter
@@ -246,6 +262,26 @@ static bool readSoil(uint32_t *soil_measurements, size_t n_meas) {
 
   pinMode(SOIL_OUT, INPUT); // Save power
   return result;
+}
+
+uint32_t readSoilMean(uint8_t n_meas) {
+  uint32_t soil_measurements[n_meas];
+  if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
+    Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
+    delay(5000);
+    ESP.restart();
+  }
+  return getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+}
+
+uint32_t readSoilMedian(uint8_t n_meas) {
+  uint32_t soil_measurements[n_meas];
+  if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
+    Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
+    delay(5000);
+    ESP.restart();
+  }
+  return getMedian(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
 }
 
 static void blinkLED() {
@@ -270,8 +306,8 @@ static bool mqttPublishBlocking(String topic, const char *buffer, size_t length,
 
 static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_config) {
   // Sensor calibration values:
-  uint32_t cal_meas_dry = DEFAULT_CALIBRATION_DRY;
-  uint32_t cal_meas_wet = DEFAULT_CALIBRATION_WET;
+  uint32_t cal_meas_dry = eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->cal_dry : DEFAULT_CALIBRATION_DRY;
+  uint32_t cal_meas_wet = eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->cal_wet : DEFAULT_CALIBRATION_WET;
 
   // Configure the hotspot
   // Note that we set the maximum number of connection to 1
@@ -336,9 +372,9 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       else if (var == F("watering_time"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_time : DEFAULT_WATERING_TIME);
       else if (var == F("cal_dry"))
-        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->cal_dry : cal_meas_dry);
+        return String(cal_meas_dry); // Setting the default value is handled when the variable is initialized
       else if (var == F("cal_wet"))
-        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->cal_wet : cal_meas_wet);
+        return String(cal_meas_wet); // Setting the default value is handled when the variable is initialized
       else if (var == F("automatic_ota"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? (eeprom_config->automatic_ota ? "checked" : "") : "checked");
       return String();
@@ -349,32 +385,28 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   });
 
   httpServer.on("/cal", HTTP_GET, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
-    request->send(200, F("text/plain"), F("Place sensor in air before clicking <a href=\"/caldry\">calibrate dry</a>"));
+    request->send(SPIFFS, F("/cal.html"), F("text/html"), false, nullptr);
     return;
   });
 
   httpServer.on("/caldry", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_dry](AsyncWebServerRequest *request) {
-    uint32_t soil_measurements[N_SOIL_MEAS];
-    if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
-      request->send(200, F("text/plain"), F("Timeout reading the soil measurement! Rebooting..."));
-      delay(5000);
-      ESP.restart();
-    }
-    uint32_t soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
-    request->send(200, F("text/plain"), String(F("Dry calibration value: ")) + String(soil_moisture) + String(F("\nNow place sensor in water before clicking <a href=\"/calwet\">calibrate wet</a>")));
+    uint32_t soil_moisture = readSoilMedian(N_SOIL_MEAS); // TODO change to N_SOIL_MEAS
+    auto processor = [&soil_moisture](const String &var) {
+      if (var == F("cal_dry"))
+        return String(soil_moisture);
+    };
+    request->send(SPIFFS, F("/caldry.html"), F("text/html"), false, processor);
     cal_meas_dry = soil_moisture;
     return;
   });
 
   httpServer.on("/calwet", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_wet](AsyncWebServerRequest *request) {
-    uint32_t soil_measurements[N_SOIL_MEAS];
-    if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
-      request->send(200, F("text/plain"), F("Timeout reading the soil measurement! Rebooting..."));
-      delay(5000);
-      ESP.restart();
-    }
-    uint32_t soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
-    request->send(200, F("text/plain"), String(F("Wet calibration value: ")) + String(soil_moisture) + String(F("\nNow go back to the <a href=\"/index\">setup page</a>")));
+    uint32_t soil_moisture = readSoilMedian(9); // TODO change to N_SOIL_MEAS
+    auto processor = [&soil_moisture](const String &var) {
+      if (var == F("cal_wet"))
+        return String(soil_moisture);
+    };
+    request->send(SPIFFS, F("/calwet.html"), F("text/html"), false, processor);
     cal_meas_wet = soil_moisture;
     return;
   });
@@ -427,6 +459,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       eeprom_config->watering_delay != watering_delay ||
       eeprom_config->watering_threshold != watering_threshold ||
       eeprom_config->watering_time != watering_time ||
+      eeprom_config->cal_dry != cal_dry ||
+      eeprom_config->cal_wet != cal_wet ||
       eeprom_config->automatic_ota != automatic_ota;
 
     // Check if the values has changed
@@ -436,6 +470,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       eeprom_config->watering_delay = watering_delay;
       eeprom_config->watering_threshold = watering_threshold;
       eeprom_config->watering_time = watering_time;
+      eeprom_config->cal_dry = cal_dry;
+      eeprom_config->cal_wet = cal_wet;
       eeprom_config->automatic_ota = automatic_ota;
     }
     // The values where succesfully configured
@@ -555,14 +591,7 @@ void setup() {
   blinkLED();
 
   // Read soil moisture
-  uint32_t soil_measurements[N_SOIL_MEAS];
-  if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
-    Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
-    delay(5000);
-    ESP.restart();
-  }
-  Serial.println(F("Read soil moisture"));
-  uint32_t soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+  uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
   Serial.print(F("Successfully found soil moisture: ")); Serial.println(soil_moisture);
 
   // Water plant
