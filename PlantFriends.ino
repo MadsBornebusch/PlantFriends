@@ -33,6 +33,12 @@
 // Define number of soil measurements
 #define N_SOIL_MEAS (4U)
 
+// Define default calibration value for dry measurement
+#define DEFAULT_CALIBRATION_DRY (0U)
+
+// Define default calibration value for wet measurement
+#define DEFAULT_CALIBRATION_WET (10000U)
+
 // Sleep interval can safely be set from 1 to 30 minutes (possibly higher, but there is a limitation to sleep time with the esp8266). Should be smaller or equal to SLEEP_TIME
 #define SLEEP_INTERVAL (10U)
 
@@ -73,6 +79,8 @@ typedef struct {
   char mqtt_username[33]; // Just set these to 32 as well
   char mqtt_password[33];
   char mqtt_base_topic[33];
+  uint32_t cal_dry;
+  uint32_t cal_wet;
 
   // Can be set via MQTT and the web interface
   uint8_t sleep_time;
@@ -261,6 +269,10 @@ static bool mqttPublishBlocking(String topic, const char *buffer, size_t length,
 }
 
 static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_config) {
+  // Sensor calibration values:
+  uint32_t cal_meas_dry = DEFAULT_CALIBRATION_DRY;
+  uint32_t cal_meas_wet = DEFAULT_CALIBRATION_WET;
+
   // Configure the hotspot
   // Note that we set the maximum number of connection to 1
   int channel = 1, ssid_hidden = 0, max_connection = 1;
@@ -297,8 +309,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   });
 
   // This is the main page with the form for configuring the device
-  httpServer.on("/", HTTP_GET, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
-    auto processor = [&eeprom_config](const String &var) {
+  httpServer.on("/", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_dry, &cal_meas_wet](AsyncWebServerRequest *request) {
+    auto processor = [&eeprom_config, &cal_meas_dry, &cal_meas_wet](const String &var) {
       if (var == F("WIFI_SSID"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->wifi_ssid : WIFI_SSID);
       else if (var == F("WIFI_PASSWORD"))
@@ -323,6 +335,10 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_threshold : DEFAULT_WATERING_THRESHOLD);
       else if (var == F("watering_time"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_time : DEFAULT_WATERING_TIME);
+      else if (var == F("cal_dry"))
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->cal_dry : cal_meas_dry);
+      else if (var == F("cal_wet"))
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->cal_wet : cal_meas_wet);
       else if (var == F("automatic_ota"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? (eeprom_config->automatic_ota ? "checked" : "") : "checked");
       return String();
@@ -332,6 +348,37 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     request->send(SPIFFS, F("/index.html"), F("text/html"), false, processor);
   });
 
+  httpServer.on("/cal", HTTP_GET, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
+    request->send(200, F("text/plain"), F("Place sensor in air before clicking <a href=\"/caldry\">calibrate dry</a>"));
+    return;
+  });
+
+  httpServer.on("/caldry", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_dry](AsyncWebServerRequest *request) {
+    uint32_t soil_measurements[N_SOIL_MEAS];
+    if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
+      request->send(200, F("text/plain"), F("Timeout reading the soil measurement! Rebooting..."));
+      delay(5000);
+      ESP.restart();
+    }
+    uint32_t soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+    request->send(200, F("text/plain"), String(F("Dry calibration value: ")) + String(soil_moisture) + String(F("\nNow place sensor in water before clicking <a href=\"/calwet\">calibrate wet</a>")));
+    cal_meas_dry = soil_moisture;
+    return;
+  });
+
+  httpServer.on("/calwet", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_wet](AsyncWebServerRequest *request) {
+    uint32_t soil_measurements[N_SOIL_MEAS];
+    if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
+      request->send(200, F("text/plain"), F("Timeout reading the soil measurement! Rebooting..."));
+      delay(5000);
+      ESP.restart();
+    }
+    uint32_t soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+    request->send(200, F("text/plain"), String(F("Wet calibration value: ")) + String(soil_moisture) + String(F("\nNow go back to the <a href=\"/index\">setup page</a>")));
+    cal_meas_wet = soil_moisture;
+    return;
+  });
+
   // Handle the post request
   httpServer.on("/", HTTP_POST, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
     if (!request->hasArg(F("wifi_ssid")) || !request->hasArg(F("wifi_password"))
@@ -339,7 +386,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       || !request->hasArg(F("mqtt_host")) || !request->hasArg(F("mqtt_port"))
       || !request->hasArg(F("mqtt_username")) || !request->hasArg(F("mqtt_password")) || !request->hasArg(F("mqtt_base_topic"))
       || !request->hasArg(F("sleep_time")) || !request->hasArg(F("watering_delay"))
-      || !request->hasArg(F("watering_threshold")) || !request->hasArg(F("watering_time"))) {
+      || !request->hasArg(F("watering_threshold")) || !request->hasArg(F("watering_time"))
+      || !request->hasArg(F("cal_dry")) || !request->hasArg(F("cal_wet")) ){
       request->send(400, F("text/plain"), F("400: Invalid request"));
       return;
     }
@@ -371,6 +419,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     decltype(eeprom_config_t::watering_delay) watering_delay = request->arg(F("watering_delay")).toInt();
     decltype(eeprom_config_t::watering_threshold) watering_threshold = request->arg(F("watering_threshold")).toInt();
     decltype(eeprom_config_t::watering_time) watering_time = request->arg(F("watering_time")).toInt();
+    decltype(eeprom_config_t::cal_dry) cal_dry = request->arg(F("cal_dry")).toInt();
+    decltype(eeprom_config_t::cal_wet) cal_wet = request->arg(F("cal_wet")).toInt();
     decltype(eeprom_config_t::automatic_ota) automatic_ota = request->hasArg(F("automatic_ota")); // The argument is only present when the checkbox is checked
 
     bool changed = eeprom_config->sleep_time != sleep_time ||
