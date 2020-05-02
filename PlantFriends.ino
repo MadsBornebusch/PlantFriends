@@ -24,9 +24,6 @@
 // Default minimum time between watering plant (minutes) and watering delay
 #define DEFAULT_WATERING_DELAY (60U)
 
-// Default watering threshold in clock cycles
-#define DEFAULT_WATERING_THRESHOLD (3200U)
-
 // Default watering threshold in percent
 #define DEFAULT_WATERING_THRESHOLD_PCT (16.0)
 
@@ -88,7 +85,6 @@ typedef struct {
   // Can be set via MQTT and the web interface
   uint8_t sleep_time;
   uint16_t watering_delay;
-  uint16_t watering_threshold;
   float watering_threshold_pct;
   uint8_t watering_time;
   bool automatic_ota; // Flag used to enable automatic OTA
@@ -371,8 +367,6 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->sleep_time : DEFAULT_SLEEP_TIME);
       else if (var == F("watering_delay"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_delay : DEFAULT_WATERING_DELAY);
-      else if (var == F("watering_threshold"))
-        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_threshold : DEFAULT_WATERING_THRESHOLD);
       else if (var == F("watering_threshold_pct"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_threshold_pct : DEFAULT_WATERING_THRESHOLD_PCT);
       else if (var == F("watering_time"))
@@ -424,7 +418,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       || !request->hasArg(F("mqtt_host")) || !request->hasArg(F("mqtt_port"))
       || !request->hasArg(F("mqtt_username")) || !request->hasArg(F("mqtt_password")) || !request->hasArg(F("mqtt_base_topic"))
       || !request->hasArg(F("sleep_time")) || !request->hasArg(F("watering_delay"))
-      || !request->hasArg(F("watering_threshold")) || !request->hasArg(F("watering_threshold_pct")) || !request->hasArg(F("watering_time"))
+      || !request->hasArg(F("watering_threshold_pct")) || !request->hasArg(F("watering_time"))
       || !request->hasArg(F("cal_dry")) || !request->hasArg(F("cal_wet")) ){
       request->send(400, F("text/plain"), F("400: Invalid request"));
       return;
@@ -455,7 +449,6 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
 
     decltype(eeprom_config_t::sleep_time) sleep_time = request->arg(F("sleep_time")).toInt();
     decltype(eeprom_config_t::watering_delay) watering_delay = request->arg(F("watering_delay")).toInt();
-    decltype(eeprom_config_t::watering_threshold) watering_threshold = request->arg(F("watering_threshold")).toInt();
     decltype(eeprom_config_t::watering_threshold_pct) watering_threshold_pct = request->arg(F("watering_threshold_pct")).toFloat();
     decltype(eeprom_config_t::watering_time) watering_time = request->arg(F("watering_time")).toInt();
     decltype(eeprom_config_t::cal_dry) cal_dry = request->arg(F("cal_dry")).toInt();
@@ -464,7 +457,6 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
 
     bool changed = eeprom_config->sleep_time != sleep_time ||
       eeprom_config->watering_delay != watering_delay ||
-      eeprom_config->watering_threshold != watering_threshold ||
       eeprom_config->watering_threshold_pct != watering_threshold_pct ||
       eeprom_config->watering_time != watering_time ||
       eeprom_config->cal_dry != cal_dry ||
@@ -476,7 +468,6 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       eeprom_config->override_retained_config_topic = true; // Make sure the config topic gets overriden on the next boot
       eeprom_config->sleep_time = sleep_time;
       eeprom_config->watering_delay = watering_delay;
-      eeprom_config->watering_threshold = watering_threshold;
       eeprom_config->watering_threshold_pct = watering_threshold_pct;
       eeprom_config->watering_time = watering_time;
       eeprom_config->cal_dry = cal_dry;
@@ -540,9 +531,9 @@ static void printEEPROMConfig(const eeprom_config_t *eeprom_config) {
   Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
     eeprom_config->mqtt_host, eeprom_config->mqtt_port,
     eeprom_config->mqtt_username, eeprom_config->mqtt_base_topic);
-  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold: %u, watering threshold in percent: %.1f, watering time: %u, automatic ota: %u\n",
+  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold in percent: %.1f, watering time: %u, automatic ota: %u\n",
     eeprom_config->sleep_time, eeprom_config->watering_delay,
-    eeprom_config->watering_threshold, eeprom_config->watering_threshold_pct, 
+    eeprom_config->watering_threshold_pct,
     eeprom_config->watering_time, eeprom_config->automatic_ota);
 }
 
@@ -676,7 +667,7 @@ void setup() {
     mqttClient.onMessage([&config_topic, &eeprom_config](char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
       if (config_topic == topic) {
         if (eeprom_config.magic_number == MAGIC_NUMBER) {
-          StaticJsonDocument<JSON_OBJECT_SIZE(6)> jsonDoc; // Create a document with room for the six objects
+          StaticJsonDocument<JSON_OBJECT_SIZE(5)> jsonDoc; // Create a document with room for the five objects
           DeserializationError error = deserializeJson(jsonDoc, payload);
           if (error) { // Test if parsing succeeds
             Serial.print(F("deserializeJson() failed: ")); Serial.println(error.c_str());
@@ -688,7 +679,6 @@ void setup() {
           // Extract all the values
           JsonVariant sleep_time_variant = jsonDoc[F("sleep_time")];
           JsonVariant watering_delay_variant = jsonDoc[F("watering_delay")];
-          JsonVariant watering_threshold_variant = jsonDoc[F("watering_threshold")];
           JsonVariant watering_threshold_pct_variant = jsonDoc[F("watering_threshold_pct")];
           JsonVariant watering_time_variant = jsonDoc[F("watering_time")];
           JsonVariant automatic_ota_variant = jsonDoc[F("automatic_ota")];
@@ -709,14 +699,6 @@ void setup() {
             if (eeprom_config.watering_delay != watering_delay) {
               changed = true;
               eeprom_config.watering_delay = watering_delay;
-            }
-          }
-
-          if (!watering_threshold_variant.isNull()) {
-            auto watering_threshold = watering_threshold_variant.as<decltype(eeprom_config_t::watering_threshold)>();
-            if (eeprom_config.watering_threshold != watering_threshold) {
-              changed = true;
-              eeprom_config.watering_threshold = watering_threshold;
             }
           }
 
@@ -791,7 +773,6 @@ void setup() {
         jsonDoc.clear(); // Make sure we start with a blank document
         jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
         jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
-        jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
         jsonDoc[F("watering_threshold_pct")] = eeprom_config.watering_threshold_pct;
         jsonDoc[F("watering_time")] = eeprom_config.watering_time;
         jsonDoc[F("automatic_ota")] = eeprom_config.automatic_ota;
@@ -970,7 +951,6 @@ void setup() {
       // Settings
       jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
       jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
-      jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
       jsonDoc[F("watering_threshold_pct")] = eeprom_config.watering_threshold_pct;
       jsonDoc[F("watering_time")] = eeprom_config.watering_time;
       jsonDoc[F("automatic_ota")] = eeprom_config.automatic_ota;
