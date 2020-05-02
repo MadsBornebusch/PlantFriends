@@ -241,7 +241,7 @@ static bool readSoil(uint32_t *soil_measurements, size_t n_meas) {
     digitalWrite(SOIL_OUT, LOW);
     pinMode(SOIL_IN, OUTPUT);
     digitalWrite(SOIL_IN, LOW);
-    delay(100); // Wait for the voltage to drop
+    delay(10); // Wait for the voltage to drop
     pinMode(SOIL_IN, INPUT);
     attachInterrupt(digitalPinToInterrupt(SOIL_IN), soilInterrupt, RISING);
     soil_timer_flag = false; // Reset the flag used for telling when the interrupt has triggered
@@ -390,7 +390,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   });
 
   httpServer.on("/caldry", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_dry](AsyncWebServerRequest *request) {
-    uint32_t soil_moisture = readSoilMedian(N_SOIL_MEAS);
+    uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
     auto processor = [&soil_moisture](const String &var) {
       if (var == F("cal_dry"))
         return String(soil_moisture);
@@ -401,7 +401,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   });
 
   httpServer.on("/calwet", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_wet](AsyncWebServerRequest *request) {
-    uint32_t soil_moisture = readSoilMedian(N_SOIL_MEAS);
+    uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
     auto processor = [&soil_moisture](const String &var) {
       if (var == F("cal_wet"))
         return String(soil_moisture);
@@ -587,7 +587,10 @@ void setup() {
   // Read battery voltage
   float voltage = (float)analogRead(A0) * 4.1f;
   Serial.print(F("Battery voltage: ")); Serial.println(voltage);
-
+  // Calculate state of charge in percent. This table is used for lipo voltage: https://blog.ampow.com/lipo-voltage-chart/
+  // The polynomial is fitted without the data points from 10% to 100% using this tool: https://arachnoid.com/polysolve/
+  float state_of_charge = -2964.08 +  (1369.59 * (voltage/1000.0)) - (152.366 * (voltage/1000.0) * (voltage/1000.0));
+  Serial.print(F("Battery State of charge: ")); Serial.println(state_of_charge);
   blinkLED();
 
   // Read soil moisture
@@ -860,6 +863,29 @@ void setup() {
       else
         Serial.println(F("Failed to send voltage discovery message due to timeout"));
 
+      // Send the state of charge "sensor"
+      jsonDoc.clear(); // Make sure we start with a blank document
+      jsonDoc[F("name")] = name + F(" Battery");
+      jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+      jsonDoc[F("stat_t")] = F("~/state");
+      jsonDoc[F("json_attr_t")] = F("~/state");
+      jsonDoc[F("val_tpl")] = F("{{value_json.state_of_charge}}");
+      jsonDoc[F("unit_of_meas")] = F("%");
+      jsonDoc[F("ic")] = F("mdi:battery");
+      jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
+      jsonDoc[F("uniq_id")] = String(chip_id) + F("_state_of_charge");
+
+      // Set device information used for the device registry
+      jsonDoc[F("device")][F("name")] = name + F(" Plant");
+      jsonDoc[F("device")][F("sw")] = SW_VERSION;
+      jsonDoc[F("device")].createNestedArray(F("ids")).add(String(chip_id));
+
+      n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+      if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("B/config"), jsonBuffer, n, true, 5 * 10))
+        Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
+      else
+        Serial.println(F("Failed to send State og charge discovery message due to timeout"));
+
       // Send the temperature "sensor" if available
       if (!isnan(temperature)) {
         jsonDoc.clear(); // Make sure we start with a blank document
@@ -941,6 +967,7 @@ void setup() {
       jsonDoc[F("soil_moisture")] = soil_moisture;
       jsonDoc[F("moisture_pct")] = String(soil_moisture_pct, 1); // Round to 1 decimal
       jsonDoc[F("voltage")] = String(voltage / 1000.0f, 2); // Round to 2 decimals
+      jsonDoc[F("state_of_charge")] = String(state_of_charge, 1); // Round to 1 decimal
       if (!isnan(temperature))
         jsonDoc[F("temperature")] = String(temperature, 1); // Round to 1 decimals
       if (!isnan(pressure))
