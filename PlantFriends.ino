@@ -134,21 +134,21 @@ Adafruit_BME280 bme280; // Connect to the BME280 via I2C
 
 
 static void bubbleSort(uint32_t *array, size_t n) {
-  //size_t n = sizeof(array[0])/sizeof(array);
+  // This sorting algorithm is shamelessly copied from https://en.wikipedia.org/wiki/Bubble_sort
   size_t new_n;
-  //unsigned long n=len;
   uint32_t temp;
-   while(n > 1){
-    new_n=0;
-    for(size_t i = 1; i < n ; i++){
-      if(array[i-1]>array[i]){
-        temp=array[i];           //swap places in array
-        array[i]=array[i-1];
-        array[i-1]=temp;
-        new_n=i;
+  while(n > 1) {
+    new_n = 0;
+    for(size_t i = 1; i < n ; i++) {
+      if(array[i - 1] > array[i]) {
+        // Swap places in array
+        temp=array[i];
+        array[i] = array[i - 1];
+        array[i - 1] = temp;
+        new_n = i;
       }
     }
-    n=new_n;
+    n = new_n;
   }
 }
 
@@ -156,11 +156,13 @@ static uint32_t getMedian(uint32_t *array, size_t n) {
   // Sort array
   bubbleSort(array, n);
 
-  if (n && 0x01){
+  // Check last bit to see if number is even or uneven
+  if (n && 0x01) {
     // Number is uneven
-    return array[n/2];
-  }else{
-    return (array[n/2-1] + array[n/2])/2;
+    return array[n / 2];
+  } else {
+    // Number is even
+    return (array[n / 2 - 1] + array[n / 2]) / 2;
   }
 }
 
@@ -168,7 +170,7 @@ static long getMean(uint32_t *array, size_t n) {
   long sum = 0;
   for (size_t i = 0; i < n; i++)
     sum += array[i];
-  return sum/n;
+  return sum / n;
 }
 
 static void handleLongSleep(sleep_data_t *sleep_data) {
@@ -206,6 +208,7 @@ static void handleLongSleep(sleep_data_t *sleep_data) {
 }
 
 static void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_data) {
+  Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config->sleep_time); Serial.println(F(" min"));
   if (sizeof(sleep_data_t) % 4 != 0) {
     Serial.println(F("Sleep data is NOT 4 byte aligned! Rebooting..."));
     delay(5000);
@@ -238,25 +241,29 @@ static bool readSoil(uint32_t *soil_measurements, size_t n_meas) {
   bool result = true;
   for (size_t i = 0; i < n_meas; i++) {
     Serial.print(i); Serial.print(": ");
+    // Discharge the capacitor by setting both pins low
     digitalWrite(SOIL_OUT, LOW);
     pinMode(SOIL_IN, OUTPUT);
     digitalWrite(SOIL_IN, LOW);
-    delay(10); // Wait for the voltage to drop
-    pinMode(SOIL_IN, INPUT);
+    //The ESP8266 can sink 12 mA max, at 4.2 V and assuming the capacitor is 1 uF (which is very high) the time constant is 350 us
+    // The capacitor should be discharged after 5 time constants so 10 ms should be plenty
+    // Check out: http://www.learningaboutelectronics.com/Articles/How-long-does-it-take-to-discharge-a-capacitor for more information
+    delay(10);
+    pinMode(SOIL_IN, INPUT); // Change the capacitor measurement pin to input again
     attachInterrupt(digitalPinToInterrupt(SOIL_IN), soilInterrupt, RISING);
     soil_timer_flag = false; // Reset the flag used for telling when the interrupt has triggered
-    uint32_t timer_start = ESP.getCycleCount(); // Reset the counter
-    digitalWrite(SOIL_OUT, HIGH); // Now set the pin high and measure the rise time using the "SOIL_IN" pin
-    int timeout = 1 * 100; // 1 second(s)
+    uint32_t timer_start = ESP.getCycleCount(); // Get the current cycle count
+    digitalWrite(SOIL_OUT, HIGH); // Now set the pin high and measure the rise time using the "SOIL_IN" pin interrupt
+    int timeout = 1 * 100; // 1 second(s) timeout
     while (!soil_timer_flag && (timeout-- > 0))
-      delay(10);
+      delay(10); // Wait for interrupt to have been called or a timeout
     detachInterrupt(digitalPinToInterrupt(SOIL_IN));
     if (timeout == 0) {  // It took more than x seconds for the voltage to rise
       result = false;
       break;
     } else {
-      soil_measurements[i] = soil_timer - timer_start;
-      Serial.println(soil_measurements[i]);
+      soil_measurements[i] = soil_timer - timer_start; // Calculate the soil measurement using the soil_timer set in the interrupt
+      Serial.println(soil_measurements[i]); // Print the measurement
     }
   }
 
@@ -641,7 +648,6 @@ void setup() {
   WiFi.begin(eeprom_config.wifi_ssid, eeprom_config.wifi_password);
   if (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println(F("Connection Failed!"));
-    Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config.sleep_time); Serial.println(F(" min"));
     // Go into long deep sleep
     longSleep(&eeprom_config, &sleep_data);
   }
@@ -1135,8 +1141,6 @@ KOqkqm57TH2H3eDJAkSnh6/DNFu0Qg==
     Serial.flush();
     ESP.restart();
   }
-
-  Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config.sleep_time); Serial.println(F(" min"));
 
   // Go into long deep sleep
   longSleep(&eeprom_config, &sleep_data);
