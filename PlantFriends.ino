@@ -610,7 +610,7 @@ void setup() {
   if (soil_moisture_pct <= eeprom_config.watering_threshold_pct && sleep_data.watering_delay_cycles <= 1) {
     Serial.println(F("Watering plant!!"));
     pinMode(WATERING_OUT, OUTPUT);
-    analogWrite(WATERING_OUT, 1023U * 3U / 4U);
+    analogWrite(WATERING_OUT, 1023U);
     delay(1000U * eeprom_config.watering_time);
     digitalWrite(WATERING_OUT, LOW);
     pinMode(WATERING_OUT, INPUT); // Save power
