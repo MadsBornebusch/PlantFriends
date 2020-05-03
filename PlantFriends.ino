@@ -135,14 +135,12 @@ Adafruit_BME280 bme280; // Connect to the BME280 via I2C
 
 static void bubbleSort(uint32_t *array, size_t n) {
   // This sorting algorithm is shamelessly copied from https://en.wikipedia.org/wiki/Bubble_sort
-  size_t new_n;
-  uint32_t temp;
-  while(n > 1) {
-    new_n = 0;
-    for(size_t i = 1; i < n ; i++) {
-      if(array[i - 1] > array[i]) {
+  while (n > 1) {
+    size_t new_n = 0;
+    for (size_t i = 1; i < n; i++) {
+      if (array[i - 1] > array[i]) {
         // Swap places in array
-        temp=array[i];
+        uint32_t temp = array[i];
         array[i] = array[i - 1];
         array[i - 1] = temp;
         new_n = i;
@@ -157,7 +155,7 @@ static uint32_t getMedian(uint32_t *array, size_t n) {
   bubbleSort(array, n);
 
   // Check last bit to see if number is even or uneven
-  if (n && 0x01) {
+  if (n & 0x01) {
     // Number is uneven
     return array[n / 2];
   } else {
@@ -245,7 +243,7 @@ static bool readSoil(uint32_t *soil_measurements, size_t n_meas) {
     digitalWrite(SOIL_OUT, LOW);
     pinMode(SOIL_IN, OUTPUT);
     digitalWrite(SOIL_IN, LOW);
-    //The ESP8266 can sink 12 mA max, at 4.2 V and assuming the capacitor is 1 uF (which is very high) the time constant is 350 us
+    // The ESP8266 can sink 12 mA max, at 4.2 V and assuming the capacitor is 1 uF (which is very high) the time constant is 350 us
     // The capacitor should be discharged after 5 time constants so 10 ms should be plenty
     // Check out: http://www.learningaboutelectronics.com/Articles/How-long-does-it-take-to-discharge-a-capacitor for more information
     delay(10);
@@ -596,7 +594,7 @@ void setup() {
   Serial.print(F("Battery voltage: ")); Serial.println(voltage);
   // Calculate state of charge in percent. This table is used for lipo voltage: https://blog.ampow.com/lipo-voltage-chart/
   // The polynomial is fitted without the data points from 10% to 100% using this tool: https://arachnoid.com/polysolve/
-  float state_of_charge = -2964.08 +  (1369.59 * (voltage/1000.0)) - (152.366 * (voltage/1000.0) * (voltage/1000.0));
+  float state_of_charge = -2964.08f + (1369.59f * (voltage / 1000.0f)) - (152.366f * (voltage / 1000.0f) * (voltage / 1000.0f));
   Serial.print(F("Battery State of charge: ")); Serial.println(state_of_charge);
   blinkLED();
 
@@ -604,13 +602,13 @@ void setup() {
   uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
   Serial.print(F("Successfully found soil moisture: ")); Serial.println(soil_moisture);
   // Calculate soil moisture percentage
-  float soil_moisture_pct = (float)((soil_moisture - eeprom_config.cal_dry) * 100) / (float)(eeprom_config.cal_wet-eeprom_config.cal_dry);
+  float soil_moisture_pct = (float)((soil_moisture - eeprom_config.cal_dry) * 100.0f) / (float)(eeprom_config.cal_wet - eeprom_config.cal_dry);
 
   // Water plant
   if (soil_moisture_pct <= eeprom_config.watering_threshold_pct && sleep_data.watering_delay_cycles <= 1) {
     Serial.println(F("Watering plant!!"));
     pinMode(WATERING_OUT, OUTPUT);
-    analogWrite(WATERING_OUT, 1023U);
+    digitalWrite(WATERING_OUT, HIGH);
     delay(1000U * eeprom_config.watering_time);
     digitalWrite(WATERING_OUT, LOW);
     pinMode(WATERING_OUT, INPUT); // Save power

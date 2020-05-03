@@ -73,7 +73,6 @@ Images of the wet and dry calibration are shown below:
 
 <img src="img/cal_dry.jpg" width="300"> <img src="img/cal_wet.jpg" height="400">
 
-
 # [Home Assistant](https://www.home-assistant.io/)
 
 Simply activate [MQTT discovery](https://www.home-assistant.io/docs/mqtt/discovery/) by adding the following to your `configuration.yaml` file:
