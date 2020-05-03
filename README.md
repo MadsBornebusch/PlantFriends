@@ -52,8 +52,6 @@ The WiFi, ThingSpeak and MQTT settings can be configured via a web interface:
 
 ![](img/plant_settings.png)
 
-TODO: new image here!!
-
 If you do not want to use ThingSpeak simply leave the `ThingSpeak API key` field empty. Similarly the MQTT can be disabled by leaving the `MQTT base topic` empty.
 
 At first boot the module will turn on a hotspot with the SSID: `PlantFriends` and password: `plantsarecool`.
@@ -88,6 +86,8 @@ mqtt:
 Assuming your plant is named `office` it will now show up as a sensor like so:
 
 ![](img/hass_sensor.png)
+
+TODO: Upate this image!
 
 The name of the plant is taken from the `MQTT base topic` and get be chaned via the [HTTP settings](#Settings) page.
 
