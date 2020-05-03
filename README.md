@@ -11,7 +11,7 @@ _________
 
 This is a plant watering ESP8266.
 
-<img src="img/orange.png" height="600"> <img src="image/closeup.png" height="600">
+<img src="img/orange.jpg" height="500"> <img src="img/closeup.jpg" height="500">
 
 # Features
 
@@ -73,7 +73,7 @@ Follow the instructions. Some handy tips:
 
 Images of the wet and dry calibration are shown below:
 
-<img src="img/cal_dry.png" height="600"> <img src="img/cal_wet.png" height="600">
+<img src="img/cal_dry.jpg" width="300"> <img src="img/cal_wet.jpg" height="400">
 
 
 # [Home Assistant](https://www.home-assistant.io/)
