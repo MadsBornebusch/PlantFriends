@@ -24,14 +24,20 @@
 // Default minimum time between watering plant (minutes) and watering delay
 #define DEFAULT_WATERING_DELAY (60U)
 
-// Default watering threshold in clock cycles
-#define DEFAULT_WATERING_THRESHOLD (3200U)
+// Default watering threshold in percent
+#define DEFAULT_WATERING_THRESHOLD_PCT (16.0)
 
 // Default watering time in seconds
 #define DEFAULT_WATERING_TIME (3U)
 
 // Define number of soil measurements
 #define N_SOIL_MEAS (4U)
+
+// Define default calibration value for dry measurement
+#define DEFAULT_CALIBRATION_DRY (0U)
+
+// Define default calibration value for wet measurement
+#define DEFAULT_CALIBRATION_WET (20000U)
 
 // Sleep interval can safely be set from 1 to 30 minutes (possibly higher, but there is a limitation to sleep time with the esp8266). Should be smaller or equal to SLEEP_TIME
 #define SLEEP_INTERVAL (10U)
@@ -73,11 +79,13 @@ typedef struct {
   char mqtt_username[33]; // Just set these to 32 as well
   char mqtt_password[33];
   char mqtt_base_topic[33];
+  uint32_t cal_dry;
+  uint32_t cal_wet;
 
   // Can be set via MQTT and the web interface
   uint8_t sleep_time;
   uint16_t watering_delay;
-  uint16_t watering_threshold;
+  float watering_threshold_pct;
   uint8_t watering_time;
   bool automatic_ota; // Flag used to enable automatic OTA
   bool override_retained_config_topic; // Used to override the retained config topic, so the values set via the web interface does not get overriden
@@ -124,29 +132,43 @@ static volatile uint16 publishedPacketId = -1;
 // BME280 sensor
 Adafruit_BME280 bme280; // Connect to the BME280 via I2C
 
-/*
-long getMedian(uint32_t *array, size_t n){
-  //n = sizeof(array[0])/sizeof(array);
 
-  // Sort array
-  for (size_t i = 0; i < n; i++){
-    for (size_t j = 0; j < n; j++){
-      if (array[j] > array[i]){
-        uint32_t tmp = array[i];
-        array[i] = array[j];
-        array[j] = tmp;
+static void bubbleSort(uint32_t *array, size_t n) {
+  // This sorting algorithm is shamelessly copied from https://en.wikipedia.org/wiki/Bubble_sort
+  while (n > 1) {
+    size_t new_n = 0;
+    for (size_t i = 1; i < n; i++) {
+      if (array[i - 1] > array[i]) {
+        // Swap places in array
+        uint32_t temp = array[i];
+        array[i] = array[i - 1];
+        array[i - 1] = temp;
+        new_n = i;
       }
-
-  for(i=0, i<sizeof(array[0])/sizeof(array), i++)
-
+    }
+    n = new_n;
+  }
 }
-*/
+
+static uint32_t getMedian(uint32_t *array, size_t n) {
+  // Sort array
+  bubbleSort(array, n);
+
+  // Check last bit to see if number is even or uneven
+  if (n & 0x01) {
+    // Number is uneven
+    return array[n / 2];
+  } else {
+    // Number is even
+    return (array[n / 2 - 1] + array[n / 2]) / 2;
+  }
+}
 
 static long getMean(uint32_t *array, size_t n) {
   long sum = 0;
   for (size_t i = 0; i < n; i++)
     sum += array[i];
-  return sum/n;
+  return sum / n;
 }
 
 static void handleLongSleep(sleep_data_t *sleep_data) {
@@ -184,6 +206,7 @@ static void handleLongSleep(sleep_data_t *sleep_data) {
 }
 
 static void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_data) {
+  Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config->sleep_time); Serial.println(F(" min"));
   if (sizeof(sleep_data_t) % 4 != 0) {
     Serial.println(F("Sleep data is NOT 4 byte aligned! Rebooting..."));
     delay(5000);
@@ -212,32 +235,58 @@ static void ICACHE_RAM_ATTR soilInterrupt() {
 
 static bool readSoil(uint32_t *soil_measurements, size_t n_meas) {
   pinMode(SOIL_OUT, OUTPUT);
-  pinMode(SOIL_IN, INPUT);
 
   bool result = true;
   for (size_t i = 0; i < n_meas; i++) {
     Serial.print(i); Serial.print(": ");
+    // Discharge the capacitor by setting both pins low
     digitalWrite(SOIL_OUT, LOW);
-    delay(10); // Wait for the voltage to drop
+    pinMode(SOIL_IN, OUTPUT);
+    digitalWrite(SOIL_IN, LOW);
+    // The ESP8266 can sink 12 mA max, at 4.2 V and assuming the capacitor is 1 uF (which is very high) the time constant is 350 us
+    // The capacitor should be discharged after 5 time constants so 10 ms should be plenty
+    // Check out: http://www.learningaboutelectronics.com/Articles/How-long-does-it-take-to-discharge-a-capacitor for more information
+    delay(10);
+    pinMode(SOIL_IN, INPUT); // Change the capacitor measurement pin to input again
     attachInterrupt(digitalPinToInterrupt(SOIL_IN), soilInterrupt, RISING);
     soil_timer_flag = false; // Reset the flag used for telling when the interrupt has triggered
-    uint32_t timer_start = ESP.getCycleCount(); // Reset the counter
-    digitalWrite(SOIL_OUT, HIGH); // Now set the pin high and measure the rise time using the "SOIL_IN" pin
-    int timeout = 1 * 100; // 1 second(s)
+    uint32_t timer_start = ESP.getCycleCount(); // Get the current cycle count
+    digitalWrite(SOIL_OUT, HIGH); // Now set the pin high and measure the rise time using the "SOIL_IN" pin interrupt
+    int timeout = 1 * 100; // 1 second(s) timeout
     while (!soil_timer_flag && (timeout-- > 0))
-      delay(10);
+      delay(10); // Wait for interrupt to have been called or a timeout
     detachInterrupt(digitalPinToInterrupt(SOIL_IN));
     if (timeout == 0) {  // It took more than x seconds for the voltage to rise
       result = false;
       break;
     } else {
-      soil_measurements[i] = soil_timer - timer_start;
-      Serial.println(soil_measurements[i]);
+      soil_measurements[i] = soil_timer - timer_start; // Calculate the soil measurement using the soil_timer set in the interrupt
+      Serial.println(soil_measurements[i]); // Print the measurement
     }
   }
 
   pinMode(SOIL_OUT, INPUT); // Save power
   return result;
+}
+
+uint32_t readSoilMean(uint8_t n_meas) {
+  uint32_t soil_measurements[n_meas];
+  if (!readSoil(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]))) {
+    Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
+    delay(5000);
+    ESP.restart();
+  }
+  return getMean(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]));
+}
+
+uint32_t readSoilMedian(uint8_t n_meas) {
+  uint32_t soil_measurements[n_meas];
+  if (!readSoil(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]))) {
+    Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
+    delay(5000);
+    ESP.restart();
+  }
+  return getMedian(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]));
 }
 
 static void blinkLED() {
@@ -261,6 +310,10 @@ static bool mqttPublishBlocking(String topic, const char *buffer, size_t length,
 }
 
 static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_config) {
+  // Sensor calibration values:
+  uint32_t cal_meas_dry = eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->cal_dry : DEFAULT_CALIBRATION_DRY;
+  uint32_t cal_meas_wet = eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->cal_wet : DEFAULT_CALIBRATION_WET;
+
   // Configure the hotspot
   // Note that we set the maximum number of connection to 1
   int channel = 1, ssid_hidden = 0, max_connection = 1;
@@ -297,8 +350,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   });
 
   // This is the main page with the form for configuring the device
-  httpServer.on("/", HTTP_GET, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
-    auto processor = [&eeprom_config](const String &var) {
+  httpServer.on("/", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_dry, &cal_meas_wet](AsyncWebServerRequest *request) {
+    auto processor = [&eeprom_config, &cal_meas_dry, &cal_meas_wet](const String &var) {
       if (var == F("WIFI_SSID"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->wifi_ssid : WIFI_SSID);
       else if (var == F("WIFI_PASSWORD"))
@@ -319,10 +372,14 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->sleep_time : DEFAULT_SLEEP_TIME);
       else if (var == F("watering_delay"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_delay : DEFAULT_WATERING_DELAY);
-      else if (var == F("watering_threshold"))
-        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_threshold : DEFAULT_WATERING_THRESHOLD);
+      else if (var == F("watering_threshold_pct"))
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_threshold_pct : DEFAULT_WATERING_THRESHOLD_PCT);
       else if (var == F("watering_time"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->watering_time : DEFAULT_WATERING_TIME);
+      else if (var == F("cal_dry"))
+        return String(cal_meas_dry); // Setting the default value is handled when the variable is initialized
+      else if (var == F("cal_wet"))
+        return String(cal_meas_wet); // Setting the default value is handled when the variable is initialized
       else if (var == F("automatic_ota"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? (eeprom_config->automatic_ota ? "checked" : "") : "checked");
       return String();
@@ -332,6 +389,33 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     request->send(SPIFFS, F("/index.html"), F("text/html"), false, processor);
   });
 
+  httpServer.on("/cal", HTTP_GET, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, F("/cal.html"), F("text/html"), false, nullptr);
+    return;
+  });
+
+  httpServer.on("/caldry", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_dry](AsyncWebServerRequest *request) {
+    uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
+    auto processor = [&soil_moisture](const String &var) {
+      if (var == F("cal_dry"))
+        return String(soil_moisture);
+    };
+    request->send(SPIFFS, F("/caldry.html"), F("text/html"), false, processor);
+    cal_meas_dry = soil_moisture;
+    return;
+  });
+
+  httpServer.on("/calwet", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_wet](AsyncWebServerRequest *request) {
+    uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
+    auto processor = [&soil_moisture](const String &var) {
+      if (var == F("cal_wet"))
+        return String(soil_moisture);
+    };
+    request->send(SPIFFS, F("/calwet.html"), F("text/html"), false, processor);
+    cal_meas_wet = soil_moisture;
+    return;
+  });
+
   // Handle the post request
   httpServer.on("/", HTTP_POST, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
     if (!request->hasArg(F("wifi_ssid")) || !request->hasArg(F("wifi_password"))
@@ -339,7 +423,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       || !request->hasArg(F("mqtt_host")) || !request->hasArg(F("mqtt_port"))
       || !request->hasArg(F("mqtt_username")) || !request->hasArg(F("mqtt_password")) || !request->hasArg(F("mqtt_base_topic"))
       || !request->hasArg(F("sleep_time")) || !request->hasArg(F("watering_delay"))
-      || !request->hasArg(F("watering_threshold")) || !request->hasArg(F("watering_time"))) {
+      || !request->hasArg(F("watering_threshold_pct")) || !request->hasArg(F("watering_time"))
+      || !request->hasArg(F("cal_dry")) || !request->hasArg(F("cal_wet")) ){
       request->send(400, F("text/plain"), F("400: Invalid request"));
       return;
     }
@@ -369,14 +454,18 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
 
     decltype(eeprom_config_t::sleep_time) sleep_time = request->arg(F("sleep_time")).toInt();
     decltype(eeprom_config_t::watering_delay) watering_delay = request->arg(F("watering_delay")).toInt();
-    decltype(eeprom_config_t::watering_threshold) watering_threshold = request->arg(F("watering_threshold")).toInt();
+    decltype(eeprom_config_t::watering_threshold_pct) watering_threshold_pct = request->arg(F("watering_threshold_pct")).toFloat();
     decltype(eeprom_config_t::watering_time) watering_time = request->arg(F("watering_time")).toInt();
+    decltype(eeprom_config_t::cal_dry) cal_dry = request->arg(F("cal_dry")).toInt();
+    decltype(eeprom_config_t::cal_wet) cal_wet = request->arg(F("cal_wet")).toInt();
     decltype(eeprom_config_t::automatic_ota) automatic_ota = request->hasArg(F("automatic_ota")); // The argument is only present when the checkbox is checked
 
     bool changed = eeprom_config->sleep_time != sleep_time ||
       eeprom_config->watering_delay != watering_delay ||
-      eeprom_config->watering_threshold != watering_threshold ||
+      eeprom_config->watering_threshold_pct != watering_threshold_pct ||
       eeprom_config->watering_time != watering_time ||
+      eeprom_config->cal_dry != cal_dry ||
+      eeprom_config->cal_wet != cal_wet ||
       eeprom_config->automatic_ota != automatic_ota;
 
     // Check if the values has changed
@@ -384,8 +473,10 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
       eeprom_config->override_retained_config_topic = true; // Make sure the config topic gets overriden on the next boot
       eeprom_config->sleep_time = sleep_time;
       eeprom_config->watering_delay = watering_delay;
-      eeprom_config->watering_threshold = watering_threshold;
+      eeprom_config->watering_threshold_pct = watering_threshold_pct;
       eeprom_config->watering_time = watering_time;
+      eeprom_config->cal_dry = cal_dry;
+      eeprom_config->cal_wet = cal_wet;
       eeprom_config->automatic_ota = automatic_ota;
     }
     // The values where succesfully configured
@@ -445,10 +536,10 @@ static void printEEPROMConfig(const eeprom_config_t *eeprom_config) {
   Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
     eeprom_config->mqtt_host, eeprom_config->mqtt_port,
     eeprom_config->mqtt_username, eeprom_config->mqtt_base_topic);
-  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold: %u, watering time: %u, automatic ota: %u\n",
+  Serial.printf("Sleep time: %u, watering delay: %u, watering threshold in percent: %.1f, watering time: %u, automatic ota: %u\n",
     eeprom_config->sleep_time, eeprom_config->watering_delay,
-    eeprom_config->watering_threshold, eeprom_config->watering_time,
-    eeprom_config->automatic_ota);
+    eeprom_config->watering_threshold_pct,
+    eeprom_config->watering_time, eeprom_config->automatic_ota);
 }
 
 void setup() {
@@ -501,25 +592,23 @@ void setup() {
   // Read battery voltage
   float voltage = (float)analogRead(A0) * 4.1f;
   Serial.print(F("Battery voltage: ")); Serial.println(voltage);
-
+  // Calculate state of charge in percent. This table is used for lipo voltage: https://blog.ampow.com/lipo-voltage-chart/
+  // The polynomial is fitted without the data points from 10% to 100% using this tool: https://arachnoid.com/polysolve/
+  float state_of_charge = -2964.08f + (1369.59f * (voltage / 1000.0f)) - (152.366f * (voltage / 1000.0f) * (voltage / 1000.0f));
+  Serial.print(F("Battery State of charge: ")); Serial.println(state_of_charge);
   blinkLED();
 
   // Read soil moisture
-  uint32_t soil_measurements[N_SOIL_MEAS];
-  if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
-    Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
-    delay(5000);
-    ESP.restart();
-  }
-  Serial.println(F("Read soil moisture"));
-  uint32_t soil_moisture = getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+  uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
   Serial.print(F("Successfully found soil moisture: ")); Serial.println(soil_moisture);
+  // Calculate soil moisture percentage
+  float soil_moisture_pct = (float)((soil_moisture - eeprom_config.cal_dry) * 100.0f) / (float)(eeprom_config.cal_wet - eeprom_config.cal_dry);
 
   // Water plant
-  if (soil_moisture <= eeprom_config.watering_threshold && sleep_data.watering_delay_cycles <= 1) {
+  if (soil_moisture_pct <= eeprom_config.watering_threshold_pct && sleep_data.watering_delay_cycles <= 1) {
     Serial.println(F("Watering plant!!"));
     pinMode(WATERING_OUT, OUTPUT);
-    analogWrite(WATERING_OUT, 1023U * 3U / 4U);
+    digitalWrite(WATERING_OUT, HIGH);
     delay(1000U * eeprom_config.watering_time);
     digitalWrite(WATERING_OUT, LOW);
     pinMode(WATERING_OUT, INPUT); // Save power
@@ -556,9 +645,9 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(eeprom_config.wifi_ssid, eeprom_config.wifi_password);
   if (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    Serial.println(F("Connection Failed! Rebooting..."));
-    delay(5000);
-    ESP.restart();
+    Serial.println(F("Connection Failed!"));
+    // Go into long deep sleep
+    longSleep(&eeprom_config, &sleep_data);
   }
   Serial.println(F("Wifi connected"));
   Serial.print(F("IP address: "));
@@ -597,7 +686,7 @@ void setup() {
           // Extract all the values
           JsonVariant sleep_time_variant = jsonDoc[F("sleep_time")];
           JsonVariant watering_delay_variant = jsonDoc[F("watering_delay")];
-          JsonVariant watering_threshold_variant = jsonDoc[F("watering_threshold")];
+          JsonVariant watering_threshold_pct_variant = jsonDoc[F("watering_threshold_pct")];
           JsonVariant watering_time_variant = jsonDoc[F("watering_time")];
           JsonVariant automatic_ota_variant = jsonDoc[F("automatic_ota")];
 
@@ -620,11 +709,11 @@ void setup() {
             }
           }
 
-          if (!watering_threshold_variant.isNull()) {
-            auto watering_threshold = watering_threshold_variant.as<decltype(eeprom_config_t::watering_threshold)>();
-            if (eeprom_config.watering_threshold != watering_threshold) {
+          if (!watering_threshold_pct_variant.isNull()) {
+            auto watering_threshold_pct = watering_threshold_pct_variant.as<decltype(eeprom_config_t::watering_threshold_pct)>();
+            if (eeprom_config.watering_threshold_pct != watering_threshold_pct) {
               changed = true;
-              eeprom_config.watering_threshold = watering_threshold;
+              eeprom_config.watering_threshold_pct = watering_threshold_pct;
             }
           }
 
@@ -691,7 +780,7 @@ void setup() {
         jsonDoc.clear(); // Make sure we start with a blank document
         jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
         jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
-        jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
+        jsonDoc[F("watering_threshold_pct")] = eeprom_config.watering_threshold_pct;
         jsonDoc[F("watering_time")] = eeprom_config.watering_time;
         jsonDoc[F("automatic_ota")] = eeprom_config.automatic_ota;
 
@@ -732,6 +821,29 @@ void setup() {
       else
         Serial.println(F("Failed to send soil moisture discovery message due to timeout"));
 
+      // Send the soil moisture "sensor" in percent
+      jsonDoc.clear(); // Make sure we start with a blank document
+      jsonDoc[F("name")] = name + F(" Soil Moisture Pct");
+      jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+      jsonDoc[F("stat_t")] = F("~/state");
+      jsonDoc[F("json_attr_t")] = F("~/state");
+      jsonDoc[F("val_tpl")] = F("{{value_json.moisture_pct}}");
+      jsonDoc[F("unit_of_meas")] = F("%");
+      jsonDoc[F("ic")] = F("mdi:sprout");
+      jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
+      jsonDoc[F("uniq_id")] = String(chip_id) + F("_moisture_pct");
+
+      // Set device information used for the device registry
+      jsonDoc[F("device")][F("name")] = name + F(" Plant");
+      jsonDoc[F("device")][F("sw")] = SW_VERSION;
+      jsonDoc[F("device")].createNestedArray(F("ids")).add(String(chip_id));
+
+      n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+      if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("M/config"), jsonBuffer, n, true, 5 * 10))
+        Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
+      else
+        Serial.println(F("Failed to send soil moisture pct discovery message due to timeout"));
+
       // Send the voltage "sensor"
       jsonDoc.clear(); // Make sure we start with a blank document
       jsonDoc[F("name")] = name + F(" Voltage");
@@ -754,6 +866,29 @@ void setup() {
         Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
       else
         Serial.println(F("Failed to send voltage discovery message due to timeout"));
+
+      // Send the state of charge "sensor"
+      jsonDoc.clear(); // Make sure we start with a blank document
+      jsonDoc[F("name")] = name + F(" Battery");
+      jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+      jsonDoc[F("stat_t")] = F("~/state");
+      jsonDoc[F("json_attr_t")] = F("~/state");
+      jsonDoc[F("val_tpl")] = F("{{value_json.state_of_charge}}");
+      jsonDoc[F("unit_of_meas")] = F("%");
+      jsonDoc[F("ic")] = F("mdi:battery");
+      jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
+      jsonDoc[F("uniq_id")] = String(chip_id) + F("_state_of_charge");
+
+      // Set device information used for the device registry
+      jsonDoc[F("device")][F("name")] = name + F(" Plant");
+      jsonDoc[F("device")][F("sw")] = SW_VERSION;
+      jsonDoc[F("device")].createNestedArray(F("ids")).add(String(chip_id));
+
+      n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+      if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("B/config"), jsonBuffer, n, true, 5 * 10))
+        Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
+      else
+        Serial.println(F("Failed to send State og charge discovery message due to timeout"));
 
       // Send the temperature "sensor" if available
       if (!isnan(temperature)) {
@@ -834,7 +969,9 @@ void setup() {
 
       // Measurements
       jsonDoc[F("soil_moisture")] = soil_moisture;
+      jsonDoc[F("moisture_pct")] = String(soil_moisture_pct, 1); // Round to 1 decimal
       jsonDoc[F("voltage")] = String(voltage / 1000.0f, 2); // Round to 2 decimals
+      jsonDoc[F("state_of_charge")] = String(state_of_charge, 1); // Round to 1 decimal
       if (!isnan(temperature))
         jsonDoc[F("temperature")] = String(temperature, 1); // Round to 1 decimals
       if (!isnan(pressure))
@@ -845,7 +982,7 @@ void setup() {
       // Settings
       jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
       jsonDoc[F("watering_delay")] = eeprom_config.watering_delay;
-      jsonDoc[F("watering_threshold")] = eeprom_config.watering_threshold;
+      jsonDoc[F("watering_threshold_pct")] = eeprom_config.watering_threshold_pct;
       jsonDoc[F("watering_time")] = eeprom_config.watering_time;
       jsonDoc[F("automatic_ota")] = eeprom_config.automatic_ota;
       jsonDoc[F("sleep_num")] = sleep_data.sleep_num;
@@ -1002,8 +1139,6 @@ KOqkqm57TH2H3eDJAkSnh6/DNFu0Qg==
     Serial.flush();
     ESP.restart();
   }
-
-  Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config.sleep_time); Serial.println(F(" min"));
 
   // Go into long deep sleep
   longSleep(&eeprom_config, &sleep_data);

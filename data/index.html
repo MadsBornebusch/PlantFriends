@@ -53,22 +53,36 @@
         </fieldset>
         <fieldset class="pure-group">
             <div class="pure-control-group">
-                <label for="sleep_time">Sleep time</label>
+                <label for="sleep_time">Sleep time [min]</label>
                 <input type="text" name="sleep_time" value="%sleep_time%">
             </div>
             <div class="pure-control-group">
-                <label for="watering_delay">Watering delay</label>
+                <label for="watering_delay">Watering delay [min]</label>
                 <input type="text" name="watering_delay" value="%watering_delay%">
             </div>
             <div class="pure-control-group">
-                <label for="watering_threshold">Watering threshold</label>
-                <input type="text" name="watering_threshold" value="%watering_threshold%">
+                <label for="watering_threshold_pct">Watering threshold [&#37;]</label>
+                <input type="text" name="watering_threshold_pct" value="%watering_threshold_pct%">
             </div>
             <div class="pure-control-group">
-                <label for="watering_time">Watering time</label>
+                <label for="watering_time">Watering time [sec]</label>
                 <input type="text" name="watering_time" value="%watering_time%">
             </div>
         </fieldset>
+        <br>
+        <a href="/cal">Calibrate soil moisture sensor</a>
+        <br>
+        <fieldset class="pure-group">
+            <div class="pure-control-group">
+                <label for="cal_dry">Calibration value dry</label>
+                <input type="text" name="cal_dry" value="%cal_dry%">
+            </div>
+            <div class="pure-control-group">
+                <label for="cal_wet">Calibration value wet</label>
+                <input type="text" name="cal_wet" value="%cal_wet%">
+            </div>
+        </fieldset>
+        <br>
         <div class="pure-controls">
             <label for="automatic_ota" class="pure-checkbox">
                 <input id="automatic_ota" type="checkbox" name="automatic_ota" style="float: left;margin: 1px 5px 0 0;" %automatic_ota%>
