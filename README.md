@@ -152,7 +152,7 @@ Now add the following to your `automations.yaml` file:
     data_template:
       entity_id: input_number.{{ trigger.topic.split('/')[1] }}_watering_delay
       value: "{{ trigger.payload_json.watering_delay | float }}"
- - service: input_number.set_value
+  - service: input_number.set_value
     data_template:
       entity_id: input_number.{{ trigger.topic.split('/')[1] }}_watering_threshold_pct
       value: "{{ trigger.payload_json.watering_threshold_pct | float }}"

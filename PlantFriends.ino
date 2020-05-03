@@ -271,22 +271,22 @@ static bool readSoil(uint32_t *soil_measurements, size_t n_meas) {
 
 uint32_t readSoilMean(uint8_t n_meas) {
   uint32_t soil_measurements[n_meas];
-  if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
+  if (!readSoil(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]))) {
     Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
     delay(5000);
     ESP.restart();
   }
-  return getMean(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+  return getMean(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]));
 }
 
 uint32_t readSoilMedian(uint8_t n_meas) {
   uint32_t soil_measurements[n_meas];
-  if (!readSoil(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]))) {
+  if (!readSoil(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]))) {
     Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
     delay(5000);
     ESP.restart();
   }
-  return getMedian(soil_measurements, sizeof(soil_measurements)/sizeof(soil_measurements[0]));
+  return getMedian(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]));
 }
 
 static void blinkLED() {
