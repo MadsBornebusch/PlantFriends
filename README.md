@@ -11,7 +11,7 @@ _________
 
 This is a plant watering ESP8266.
 
-TODO: Add picture of a plant here
+<img src="img/orange.jpg" height="500"> <img src="img/closeup.jpg" height="500">
 
 # Features
 
@@ -26,7 +26,7 @@ TODO: Add picture of a plant here
 
 # PCB
 
-TODO: Add picture of the PCB here
+<img src="pcb/pcb0.png" height="600"> <img src="pcb/pcb1.png" height="600">
 
 ## Pinout when seen from component side:
 
@@ -62,6 +62,18 @@ The device can be put back into hotspot mode by shorting the TX and RX pins and 
 
 A new firmware and file system image can be uploaded by navigation to <http://plantfriends.local/update> or <http://192.168.4.1/update>.
 
+## Calibrating the soil moisture sensor
+Click "Calibrate Soil moisture sensor". 
+Follow the instructions. Some handy tips:
+- Don't get the electronics wet, only the sensor part
+- When doing the wet calibration, use a half full glass of water (or half empty if you are that tye of person). Half of the sensor should be in water. Otherwise the readings when the sensor is put in soil will be very low. 
+- If you need to redo a step in the calibration, just refresh the page.
+
+Images of the wet and dry calibration are shown below:
+
+<img src="img/cal_dry.jpg" width="300"> <img src="img/cal_wet.jpg" height="400">
+
+
 # [Home Assistant](https://www.home-assistant.io/)
 
 Simply activate [MQTT discovery](https://www.home-assistant.io/docs/mqtt/discovery/) by adding the following to your `configuration.yaml` file:
@@ -74,6 +86,8 @@ mqtt:
 Assuming your plant is named `office` it will now show up as a sensor like so:
 
 ![](img/hass_sensor.png)
+
+TODO: Upate this image!
 
 The name of the plant is taken from the `MQTT base topic` and get be chaned via the [HTTP settings](#Settings) page.
 
@@ -99,13 +113,13 @@ input_number:
     step: 10
     icon: mdi:timer-sand
     unit_of_measurement: min
-  office_watering_threshold:
-    name: Watering Threshold
+  office_watering_threshold_pct:
+    name: Watering Threshold Pct
     min: 0
-    max: 10000
-    step: 100
+    max: 100
+    step: 0.1
     icon: mdi:target
-    unit_of_measurement: clk
+    unit_of_measurement: pct
   office_watering_time:
     name: Watering Time
     min: 1
@@ -139,10 +153,10 @@ Now add the following to your `automations.yaml` file:
     data_template:
       entity_id: input_number.{{ trigger.topic.split('/')[1] }}_watering_delay
       value: "{{ trigger.payload_json.watering_delay | float }}"
-  - service: input_number.set_value
+ - service: input_number.set_value
     data_template:
-      entity_id: input_number.{{ trigger.topic.split('/')[1] }}_watering_threshold
-      value: "{{ trigger.payload_json.watering_threshold | float }}"
+      entity_id: input_number.{{ trigger.topic.split('/')[1] }}_watering_threshold_pct
+      value: "{{ trigger.payload_json.watering_threshold_pct | float }}"
   - service: input_number.set_value
     data_template:
       entity_id: input_number.{{ trigger.topic.split('/')[1] }}_watering_time
@@ -158,7 +172,7 @@ Now add the following to your `automations.yaml` file:
     entity_id:
       - input_number.office_sleep_time
       - input_number.office_watering_delay
-      - input_number.office_watering_threshold
+      - input_number.office_watering_threshold_pct
       - input_number.office_watering_time
       - input_number.office_automatic_ota
   action:
@@ -172,7 +186,7 @@ Now add the following to your `automations.yaml` file:
         {
           "sleep_time": {{ states('input_number.' + topic + '_sleep_time') | int }},
           "watering_delay": {{ states('input_number.' + topic + '_watering_delay') | int }},
-          "watering_threshold": {{ states('input_number.' + topic + '_watering_threshold') | int }},
+          "watering_threshold": {{ states('input_number.' + topic + '_watering_threshold_pct') | int }},
           "watering_time": {{ states('input_number.' + topic + '_watering_time') | int }},
           "automatic_ota": {{ ((states('input_number.' + topic + '_automatic_ota') | int) > 0) | tojson }}
         }
@@ -187,14 +201,15 @@ office_plant:
     name: "Office Plant"
     icon: mdi:sprout
     entities:
-    - sensor.office_soil_moisture
+    - sensor.office_soil_moisture_pct
     - sensor.office_voltage
+    - sensor.office_battery
     - sensor.office_temperature
     - sensor.office_pressure
     - sensor.office_humidity
     - input_number.office_sleep_time
     - input_number.office_watering_delay
-    - input_number.office_watering_threshold
+    - input_number.office_watering_threshold_pct
     - input_number.office_watering_time
     - input_number.office_automatic_ota
 ```
@@ -204,6 +219,8 @@ Note that the `temperature`, `pressure` and `humidity` sensors are only availabl
 The plant will now show up in the Home Assistant overview like so:
 
 ![](img/hass_card.png)
+
+TODO: Update this image
 
 # ThingSpeak
 
