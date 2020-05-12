@@ -1,4 +1,5 @@
 #include <Adafruit_BME280.h>
+#include <Adafruit_BME680.h>
 #include <ArduinoJson.h>
 #include <AsyncMqttClient.h>
 #include <ESPAsyncWebServer.h>
@@ -25,7 +26,7 @@
 #define DEFAULT_WATERING_DELAY (60U)
 
 // Default watering threshold in percent
-#define DEFAULT_WATERING_THRESHOLD_PCT (16.0)
+#define DEFAULT_WATERING_THRESHOLD_PCT (16.0f)
 
 // Default watering time in seconds
 #define DEFAULT_WATERING_TIME (3U)
@@ -131,6 +132,9 @@ static volatile uint16 publishedPacketId = -1;
 
 // BME280 sensor
 Adafruit_BME280 bme280; // Connect to the BME280 via I2C
+
+// BME680 sensor
+Adafruit_BME680 bme680; // Connect to the BME680 via I2C
 
 
 static void bubbleSort(uint32_t *array, size_t n) {
@@ -620,8 +624,9 @@ void setup() {
   // The SCL and SDA pins are accidently swapped compared to the BME280 breakout
   Wire.pins(SCL, SDA);
 
+  // Define variables for environment sensors
+  float temperature = NAN, pressure = NAN, humidity = NAN, gas_resistance = NAN;
   // Read BME280 if available
-  float temperature = NAN, pressure = NAN, humidity = NAN;
   if (bme280.begin(BME280_ADDRESS_ALTERNATE)) {
     Serial.println(F("Found BME280"));
 
@@ -640,6 +645,28 @@ void setup() {
     Serial.printf("Temperature: %.1f C, pressure: %.1f hPa, humidity: %.1f %%\n", temperature, pressure, humidity);
   } else
     Serial.println(F("BME280 is not available"));
+  
+  // Read BME280 if available
+  if (bme680.begin(BME680_DEFAULT_ADDRESS)) {
+
+    // Set up oversampling and filter initialization
+    bme680.setTemperatureOversampling(BME680_OS_8X);
+    bme680.setHumidityOversampling(BME680_OS_2X);
+    bme680.setPressureOversampling(BME680_OS_4X);
+    bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
+    bme680.setGasHeater(320, 150); // 320*C for 150 ms
+
+    // Take the measurement
+    if(!bme680.performReading()){}
+      Serial.println(F("Failed to complete full BME680 reading"));
+    temperature = bme680.temperature; // C
+    pressure = bme680.pressure / 100.0f; // hPa
+    humidity = bme680.humidity; // %
+    gas_resistance = bme680.gas_resistance / 1000.0f; // KOhm
+    Serial.printf("Temperature: %.1f C, pressure: %.1f hPa, humidity: %.1f %%, VOC gas resistance: %.1f KOhm\n", 
+      temperature, pressure, humidity, gas_resistance);
+  } else
+    Serial.println(F("BME680 is not available"));
 
   // Connect to Wifi
   WiFi.mode(WIFI_STA);
