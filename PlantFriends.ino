@@ -32,7 +32,7 @@
 #define DEFAULT_WATERING_TIME (3U)
 
 // Define number of soil measurements
-#define N_SOIL_MEAS (4U)
+#define N_SOIL_MEAS (6U)
 
 // Define default calibration value for dry measurement
 #define DEFAULT_CALIBRATION_DRY (0U)
@@ -399,7 +399,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   });
 
   httpServer.on("/caldry", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_dry](AsyncWebServerRequest *request) {
-    uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
+    uint32_t soil_moisture = readSoilMedian(N_SOIL_MEAS);
     auto processor = [&soil_moisture](const String &var) {
       if (var == F("cal_dry"))
         return String(soil_moisture);
@@ -410,7 +410,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   });
 
   httpServer.on("/calwet", HTTP_GET, [&eeprom_config, &p_run_hotspot, &cal_meas_wet](AsyncWebServerRequest *request) {
-    uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
+    uint32_t soil_moisture = readSoilMedian(N_SOIL_MEAS);
     auto processor = [&soil_moisture](const String &var) {
       if (var == F("cal_wet"))
         return String(soil_moisture);
@@ -603,7 +603,7 @@ void setup() {
   blinkLED();
 
   // Read soil moisture
-  uint32_t soil_moisture = readSoilMean(N_SOIL_MEAS);
+  uint32_t soil_moisture = readSoilMedian(N_SOIL_MEAS);
   Serial.print(F("Successfully found soil moisture: ")); Serial.println(soil_moisture);
   // Calculate soil moisture percentage
   float soil_moisture_pct = (float)((soil_moisture - eeprom_config.cal_dry) * 100.0f) / (float)(eeprom_config.cal_wet - eeprom_config.cal_dry);
