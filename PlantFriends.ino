@@ -992,6 +992,31 @@ void setup() {
           Serial.println(F("Failed to send humidity discovery message due to timeout"));
       }
 
+       // Send the gas "sensor" if available
+      if (!isnan(gas_resistance)) {
+        jsonDoc.clear(); // Make sure we start with a blank document
+        jsonDoc[F("name")] = name + F(" VOC gas");
+        jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
+        jsonDoc[F("stat_t")] = F("~/state");
+        jsonDoc[F("json_attr_t")] = F("~/state");
+        jsonDoc[F("val_tpl")] = F("{{value_json.gas_resistance}}");
+        jsonDoc[F("unit_of_meas")] = F("KOhm");
+        jsonDoc[F("ic")] = F("mdi:weather-windy");
+        jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
+        jsonDoc[F("uniq_id")] = String(chip_id) + F("_gas_resistance");
+
+        // Set device information used for the device registry
+        jsonDoc[F("device")][F("name")] = name + F(" Plant");
+        jsonDoc[F("device")][F("sw")] = SW_VERSION;
+        jsonDoc[F("device")].createNestedArray(F("ids")).add(String(chip_id));
+
+        n = serializeJson(jsonDoc, jsonBuffer, sizeof(jsonBuffer));
+        if (mqttPublishBlocking(String(F("homeassistant/sensor/")) + String(eeprom_config.mqtt_base_topic) + F("G/config"), jsonBuffer, n, true, 5 * 10))
+          Serial.printf("Successfully sent MQTT message: %s, length: %u\n", jsonBuffer, n);
+        else
+          Serial.println(F("Failed to send gas resistance discovery message due to timeout"));
+      }
+
       jsonDoc.clear(); // Make sure we start with a blank document
 
       // Measurements
@@ -1005,6 +1030,8 @@ void setup() {
         jsonDoc[F("pressure")] = String(pressure, 1); // Round to 1 decimals
       if (!isnan(humidity))
         jsonDoc[F("humidity")] = String(humidity, 0); // Round to 0 decimals
+      if (!isnan(gas_resistance))
+        jsonDoc[F("gas_resistance")] = String(gas_resistance, 1); // Round to 1 decimals
 
       // Settings
       jsonDoc[F("sleep_time")] = eeprom_config.sleep_time;
