@@ -19,7 +19,6 @@
 #define WIFI_AP_PASSWORD "plantsarecool"
 
 // Default sleep time in minutes
-// Note that this can never be lower than "SLEEP_INTERVAL"
 #define DEFAULT_SLEEP_TIME (10U)
 
 // Default minimum time between watering plant (minutes) and watering delay
@@ -40,11 +39,11 @@
 // Define default calibration value for wet measurement
 #define DEFAULT_CALIBRATION_WET (20000U)
 
-// Sleep interval can safely be set from 1 to 30 minutes (possibly higher, but there is a limitation to sleep time with the esp8266). Should be smaller or equal to SLEEP_TIME
-#define SLEEP_INTERVAL (10U)
+// The maximum time the ESP8266 can sleep in deepSleep
+#define MAX_SLEEP_TIME (30u)
 
 // Calculate sleep interval and number of sleeps
-#define SLEEP_INTERVAL_US (SLEEP_INTERVAL * 60UL * 1000000UL)
+#define MIN_TO_US (60UL * 1000000UL)
 
 // RTC memory address to use for sleep counter - note that the first 128 bytes are used by the OTA and the offset is set in block of 4 bytes, so we set the value to 128/4=32, so OTA still works
 #define SLEEP_DATA_ADDR (32U)
@@ -95,8 +94,9 @@ typedef struct {
 typedef struct {
   uint64_t magic_number; // Used to determine if the RTC memory has been configured or not
   uint8_t sleep_num; // Stores the current sleep interval number
+  uint8_t sleep_interval; // Stores the length of the sleep intervals in minutes
   uint8_t watering_delay_cycles; // Stores the number of cycles the board must sleep before it will water the plant again
-  uint16_t firmware_update_counter; // Used to only check for updates every 24 hrs
+  uint8_t firmware_update_counter; // Used to only check for updates every 24 hrs
 } __attribute__ ((packed, aligned(4))) sleep_data_t; // The struct needs to be 4-byte aligned in the RTC memory
 
 // Wifi
@@ -177,6 +177,7 @@ static long getMean(uint32_t *array, size_t n) {
 
 static void handleLongSleep(sleep_data_t *sleep_data) {
   if (sizeof(sleep_data_t) % 4 != 0) {
+    // TODO: This should never happen when we use the aligned on the sleep_data_t type??
     Serial.println(F("Sleep data is NOT 4 byte aligned! Rebooting..."));
     delay(5000);
     ESP.restart();
@@ -186,13 +187,15 @@ static void handleLongSleep(sleep_data_t *sleep_data) {
     Serial.println(F("Failed to read RTC user memory"));
 
   if (sleep_data->magic_number != MAGIC_NUMBER) {
-    Serial.println(F("Failed to read sleep data from the RTC memory"));
+    Serial.println(F("RTC memory is not configured yet. Configuring.."));
     sleep_data->magic_number = MAGIC_NUMBER;
     sleep_data->sleep_num = 1;
+    sleep_data->sleep_interval = DEFAULT_SLEEP_TIME;
     sleep_data->watering_delay_cycles = 1;
     sleep_data->firmware_update_counter = 0;
   } else {
     // We just woke up, so increment the counter
+    // TODO: This should not be in the if-statement??
     sleep_data->firmware_update_counter++;
   }
 
@@ -205,24 +208,32 @@ static void handleLongSleep(sleep_data_t *sleep_data) {
     Serial.print(F("Going to sleep again. Times left to sleep: ")); Serial.println(sleep_data->sleep_num);
     if (!ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t)))
       Serial.println(F("Failed to write RTC user memory"));
-    ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
+    ESP.deepSleep(sleep_data->sleep_interval * MIN_TO_US, WAKE_RF_DEFAULT);
   }
 }
 
 static void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_data) {
   Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config->sleep_time); Serial.println(F(" min"));
   if (sizeof(sleep_data_t) % 4 != 0) {
+    // TODO: This should never happen when we use the aligned on the sleep_data_t type??
     Serial.println(F("Sleep data is NOT 4 byte aligned! Rebooting..."));
     delay(5000);
     ESP.restart();
   }
 
   sleep_data->magic_number = MAGIC_NUMBER;
-  sleep_data->sleep_num = eeprom_config->sleep_time / SLEEP_INTERVAL; // Set the number of times it should wakeup and go back to sleep again immediately
+  // Set the number of times it should wakeup and go back to sleep again immediately
+  if (eeprom_config->sleep_time > MAX_SLEEP_TIME)
+    sleep_data->sleep_num = eeprom_config->sleep_time / (uint8_t)roundf((float)eeprom_config->sleep_time / (float)MAX_SLEEP_TIME + 0.5f);
+  else
+    sleep_data->sleep_num = 1;
+  // Set the sleep interval
+  sleep_data->sleep_interval = eeprom_config->sleep_time / sleep_data->sleep_num;
+  Serial.print(F("Sleeping for: ")); Serial.print(sleep_data->sleep_interval); Serial.println(F(" min at a time"));
   Serial.print(F("Number of sleeps left: ")); Serial.println(sleep_data->sleep_num);
   if (!ESP.rtcUserMemoryWrite(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t)))
     Serial.println(F("Failed to write RTC user memory"));
-  ESP.deepSleep(SLEEP_INTERVAL_US, WAKE_RF_DEFAULT);
+  ESP.deepSleep(sleep_data->sleep_interval * MIN_TO_US, WAKE_RF_DEFAULT);
 }
 
 // Copy of ESP.getCycleCount(), but can safely be called inside an interrupt
@@ -646,7 +657,7 @@ void setup() {
   } else
     Serial.println(F("BME280 is not available"));
   
-  // Read BME280 if available
+  // Read BME680 if available
   if (bme680.begin(BME680_DEFAULT_ADDRESS)) {
 
     // Set up oversampling and filter initialization
@@ -654,9 +665,10 @@ void setup() {
     bme680.setHumidityOversampling(BME680_OS_2X);
     bme680.setPressureOversampling(BME680_OS_4X);
     bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
-    bme680.setGasHeater(320, 150); // 320*C for 150 ms
+    bme680.setGasHeater(350, 250); // 350*C for 250 ms
 
     // Take the measurement
+    unsigned long start_time = millis();
     if(!bme680.performReading()){}
       Serial.println(F("Failed to complete full BME680 reading"));
     temperature = bme680.temperature; // C
@@ -665,6 +677,7 @@ void setup() {
     gas_resistance = bme680.gas_resistance / 1000.0f; // KOhm
     Serial.printf("Temperature: %.1f C, pressure: %.1f hPa, humidity: %.1f %%, VOC gas resistance: %.1f KOhm\n", 
       temperature, pressure, humidity, gas_resistance);
+    Serial.printf("Reading the BME680 took %u milliseconds\n", (unsigned int)(millis() - start_time));
   } else
     Serial.println(F("BME680 is not available"));
 
@@ -1001,7 +1014,7 @@ void setup() {
         jsonDoc[F("json_attr_t")] = F("~/state");
         jsonDoc[F("val_tpl")] = F("{{value_json.gas_resistance}}");
         jsonDoc[F("unit_of_meas")] = F("KOhm");
-        jsonDoc[F("ic")] = F("mdi:weather-windy");
+        jsonDoc[F("ic")] = F("mdi:air-filter");
         jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
         jsonDoc[F("uniq_id")] = String(chip_id) + F("_gas_resistance");
 
@@ -1083,7 +1096,7 @@ void setup() {
 #endif
 
   bool ota_reboot = false; // We will handle the OTA reboot manually, as we need to save the EEPROM values first
-  if (eeprom_config.automatic_ota && sleep_data.firmware_update_counter >= 24U * 60U / SLEEP_INTERVAL) { // Only check for updates every 24 hrs
+  if (eeprom_config.automatic_ota && sleep_data.firmware_update_counter >= 24U * 60U / sleep_data.sleep_interval) { // Only check for updates every 24 hrs
     sleep_data.firmware_update_counter = 0;
 
     // The LED will be on during download of one buffer of data from the network. The LED will
