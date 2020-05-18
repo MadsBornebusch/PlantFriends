@@ -801,7 +801,7 @@ void setup() {
     // Publish the data via MQTT
     if (mqttClient.connected()) {
       DynamicJsonDocument jsonDoc(1024); // Create a JSON document - you need to allocate more memory if you change the code below
-      char jsonBuffer[350]; // Buffer used for storing the payload
+      char jsonBuffer[400]; // Buffer used for storing the payload
 
       // Capitilize the first character
       String first_char = String(eeprom_config.mqtt_base_topic).substring(0, 1);
