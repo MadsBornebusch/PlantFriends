@@ -46,6 +46,12 @@ Left side from top:
 - VCC (3.3 V)
 - Watering OUT
 
+# Enclosure
+
+A enclosure meant for 3D printing can be found in the [enclosure](enclosure) directory. Two variant are available. One with a closed top and one with a cutout for mounting a breakout board.
+
+TODO: Add pictures
+
 # Settings
 
 The WiFi, ThingSpeak and MQTT settings can be configured via a web interface:
@@ -63,10 +69,10 @@ The device can be put back into hotspot mode by shorting the TX and RX pins and 
 A new firmware and file system image can be uploaded by navigation to <http://plantfriends.local/update> or <http://192.168.4.1/update>.
 
 ## Calibrating the soil moisture sensor
-Click "Calibrate Soil moisture sensor". 
+Click "Calibrate Soil moisture sensor".
 Follow the instructions. Some handy tips:
 - Don't get the electronics wet, only the sensor part
-- When doing the wet calibration, use a half full glass of water (or half empty if you are that tye of person). Half of the sensor should be in water. Otherwise the readings when the sensor is put in soil will be very low. 
+- When doing the wet calibration, use a half full glass of water (or half empty if you are that tye of person). Half of the sensor should be in water. Otherwise the readings when the sensor is put in soil will be very low.
 - If you need to redo a step in the calibration, just refresh the page.
 
 Images of the wet and dry calibration are shown below:
