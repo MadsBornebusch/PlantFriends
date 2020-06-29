@@ -1078,7 +1078,7 @@ void setup() {
       jsonDoc[F("json_attr_t")] = F("~/state");
       jsonDoc[F("val_tpl")] = F("{{value_json.plant_watered}}");
       jsonDoc[F("unit_of_meas")] = F("sec");
-      jsonDoc[F("ic")] = F("mdi:watering-can");
+      jsonDoc[F("ic")] = F("mdi:water"); // TODO: Use watering-can when available
       jsonDoc[F("frc_upd")] = true; // Make sure that the sensor value is always stored and not just when it changes
       jsonDoc[F("uniq_id")] = String(chip_id) + F("_plant_watered");
 
