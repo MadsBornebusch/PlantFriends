@@ -311,6 +311,45 @@ static void blinkLED() {
   pinMode(LED_PIN, INPUT); // Save power
 }
 
+static float getSOC(float voltage) {
+  // Returns the battery state of charge calculated using the battery voltage
+  // The SOC is calculated using piecewise linear interpolation.
+  // The SOC for different battery percentages are from the bottom right table from this site:
+  // https://lygte-info.dk/info/BatteryChargePercent%20UK.html
+  switch ((int)(voltage*10))
+  {
+  case 40:
+    return (voltage - 4.0f) * ((94.0f - 83.0f) * 10.0f) + 83.0f;
+    break;
+  case 39:
+    return (voltage - 3.9f) * ((83.0f - 72.0f) * 10.0f) + 72.0f;
+    break;
+  case 38:
+    return (voltage - 3.8f) * ((72.0f - 59.0f) * 10.0f) + 59.0f;
+    break;
+  case 37:
+    return (voltage - 3.7f) * ((59.0f - 50.0f) * 10.0f) + 50.0f;
+    break;
+  case 36:
+    return (voltage - 3.6f) * ((50.0f - 33.0f) * 10.0f) + 33.0f;
+    break;
+  case 35:
+    return (voltage - 3.5f) * ((33.0f - 15.0f) * 10.0f) + 15.0f;
+    break;
+  case 34:
+    return (voltage - 3.4f) * ((15.0f - 6.0f) * 10.0f) + 6.0f;
+    break;
+  default:
+    // Check if too high or too low
+    if (voltage > 4.1) {
+      return (voltage - 4.1f) * ((100.0f - 94.0f) * 10.0f) + 94.0f;
+    } else if (voltage < 3.4){
+      return (voltage - 3.3f) * ((6.0f - 0.0f) * 10.0f) + 0.0f;
+    }
+    break;
+  }
+}
+
 static void onMqttPublish(uint16_t packetId) {
   publishedPacketId = packetId;
   //Serial.printf("Publish acknowledged - packet ID: %u\n", packetId);
@@ -607,9 +646,8 @@ void setup() {
   // Read battery voltage
   float voltage = (float)analogRead(A0) * 4.1f;
   Serial.print(F("Battery voltage: ")); Serial.println(voltage);
-  // Calculate state of charge in percent. This table is used for lipo voltage: https://blog.ampow.com/lipo-voltage-chart/
-  // The polynomial is fitted without the data points from 10% to 100% using this tool: https://arachnoid.com/polysolve/
-  float state_of_charge = -2964.08f + (1369.59f * (voltage / 1000.0f)) - (152.366f * (voltage / 1000.0f) * (voltage / 1000.0f));
+  // Get the state of charge
+  float state_of_charge = getSOC(voltage/1000.0f);
   Serial.print(F("Battery State of charge: ")); Serial.println(state_of_charge);
   blinkLED();
 
