@@ -1006,7 +1006,7 @@ void setup() {
       }
 
        // Send the gas "sensor" if available
-      if (!isnan(gas_resistance)) {
+      if (!isnan(gas_resistance) && (gas_resistance != 0.0f)) {
         jsonDoc.clear(); // Make sure we start with a blank document
         jsonDoc[F("name")] = name + F(" VOC gas");
         jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
