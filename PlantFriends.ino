@@ -341,7 +341,7 @@ static float getSOC(float voltage) {
     break;
   default:
     // Check if too high or too low
-    if (voltage > 4.1) {
+    if (voltage >= 4.1) {
       return (voltage - 4.1f) * ((100.0f - 94.0f) * 10.0f) + 94.0f;
     } else if (voltage < 3.4){
       return (voltage - 3.3f) * ((6.0f - 0.0f) * 10.0f) + 0.0f;
@@ -658,7 +658,7 @@ void setup() {
   uint32_t soil_moisture = readSoilMedian(N_SOIL_MEAS);
   Serial.print(F("Successfully found soil moisture: ")); Serial.println(soil_moisture);
   // Calculate soil moisture percentage
-  float soil_moisture_pct = (float)((soil_moisture - eeprom_config.cal_dry) * 100.0f) / (float)(eeprom_config.cal_wet - eeprom_config.cal_dry);
+  float soil_moisture_pct = (float)(((int32_t)soil_moisture - (int32_t)eeprom_config.cal_dry) * 100.0f) / (float)(eeprom_config.cal_wet - eeprom_config.cal_dry);
 
   // Water plant
   uint8_t plant_watered = 0;
@@ -1049,7 +1049,7 @@ void setup() {
       }
 
       // Send the gas "sensor" if available
-      if (!isnan(gas_resistance) && (gas_resistance != 0.0f)) {
+      if (!isnan(gas_resistance)) {
         jsonDoc.clear(); // Make sure we start with a blank document
         jsonDoc[F("name")] = name + F(" VOC gas");
         jsonDoc[F("~")] = String(F("plant/")) + eeprom_config.mqtt_base_topic;
@@ -1109,7 +1109,7 @@ void setup() {
         jsonDoc[F("pressure")] = String(pressure, 1); // Round to 1 decimals
       if (!isnan(humidity))
         jsonDoc[F("humidity")] = String(humidity, 0); // Round to 0 decimals
-      if (!isnan(gas_resistance))
+      if (!isnan(gas_resistance) && (gas_resistance != 0.0f))
         jsonDoc[F("gas_resistance")] = String(gas_resistance, 1); // Round to 1 decimals
       jsonDoc[F("plant_watered")] = plant_watered;
 
