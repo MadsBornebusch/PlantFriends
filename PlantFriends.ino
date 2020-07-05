@@ -96,7 +96,7 @@ typedef struct {
   uint8_t sleep_num; // Stores the current sleep interval number
   uint8_t sleep_interval; // Stores the length of the sleep intervals in minutes
   uint8_t watering_delay_cycles; // Stores the number of cycles the board must sleep before it will water the plant again
-  uint8_t firmware_update_counter; // Used to only check for updates every 24 hrs
+  uint16_t firmware_update_counter; // Used to only check for updates every 24 hrs
 } __attribute__ ((packed, aligned(4))) sleep_data_t; // The struct needs to be 4-byte aligned in the RTC memory
 
 // Wifi
@@ -348,6 +348,7 @@ static float getSOC(float voltage) {
     }
     break;
   }
+  return 0.0;
 }
 
 static void onMqttPublish(uint16_t packetId) {
@@ -453,6 +454,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     auto processor = [&soil_moisture](const String &var) {
       if (var == F("cal_dry"))
         return String(soil_moisture);
+      return String();
     };
     request->send(SPIFFS, F("/caldry.html"), F("text/html"), false, processor);
     cal_meas_dry = soil_moisture;
@@ -464,6 +466,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     auto processor = [&soil_moisture](const String &var) {
       if (var == F("cal_wet"))
         return String(soil_moisture);
+      return String();
     };
     request->send(SPIFFS, F("/calwet.html"), F("text/html"), false, processor);
     cal_meas_wet = soil_moisture;
@@ -673,7 +676,7 @@ void setup() {
     sleep_data.watering_delay_cycles--;
 
   // The SCL and SDA pins are accidently swapped compared to the BME280 breakout
-  Wire.pins(SCL, SDA);
+  Wire.begin(SCL, SDA);
 
   // Define variables for environment sensors
   float temperature = NAN, pressure = NAN, humidity = NAN, gas_resistance = NAN;
