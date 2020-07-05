@@ -48,11 +48,11 @@ Left side from top:
 
 # Settings
 
-The WiFi, ThingSpeak and MQTT settings can be configured via a web interface:
+The WiFi, Blynk and MQTT settings can be configured via a web interface:
 
 ![](img/plant_settings.png)
 
-If you do not want to use ThingSpeak simply leave the `ThingSpeak API key` field empty. Similarly the MQTT can be disabled by leaving the `MQTT base topic` empty.
+If you do not want to use Blynk simply leave the `Blynk Auth token` field empty. Similarly the MQTT can be disabled by leaving the `MQTT base topic` empty.
 
 At first boot the module will turn on a hotspot with the SSID: `PlantFriends` and password: `plantsarecool`.
 
@@ -221,6 +221,30 @@ The plant will now show up in the Home Assistant overview like so:
 
 TODO: Update this image
 
-# ThingSpeak
+# Blynk
 
-TODO: Add guide
+## Virtual pins
+
+Settings:
+- V0: Sleep time
+- V1: Watering delay
+- V2: Watering threshold in percent
+- V3: Watering time
+- V4: Automatic OTA
+
+Measurements:
+- V16: Soil moisture
+- V17: Soil moisture pct
+- V18: Voltage
+- V19: State of charge (battery pct)
+- V20: Temperature
+- V21: Pressure
+- V22: Humidity
+- V23: Gas resistance
+- V24: Plant watered
+
+Info:
+- V32: sleep num
+- V33: Watering delay cycles
+- V34: Firmware update couter
+- V35: Software version

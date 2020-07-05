@@ -2,6 +2,7 @@
 #include <Adafruit_BME680.h>
 #include <ArduinoJson.h>
 #include <AsyncMqttClient.h>
+#include <BlynkSimpleEsp8266.h>
 #include <ESPAsyncWebServer.h>
 #include <EEPROM.h>
 #include <ESP8266httpUpdate.h>
@@ -48,9 +49,6 @@
 // RTC memory address to use for sleep counter - note that the first 128 bytes are used by the OTA and the offset is set in block of 4 bytes, so we set the value to 128/4=32, so OTA still works
 #define SLEEP_DATA_ADDR (32U)
 
-// Define whether to post to Thingspeak
-#define POST_TO_THINGSPEAK
-
 // Define soil output and measurement pins
 #define SOIL_OUT (14U)
 #define SOIL_IN (12U)
@@ -73,7 +71,7 @@ typedef struct {
   uint64_t magic_number; // Used to determine if the EEPROM have been configured or not
   char wifi_ssid[33]; // SSID should be a maximum of 32 characters according to the specs
   char wifi_password[33]; // Restrict password length to 32 characters
-  char thingspeak_api_key[17]; // The API is 16 characters
+  char blynk_api_key[33]; // The API is 32 characters
   char mqtt_host[51]; // Restrict URLs to 50 characters
   uint16_t mqtt_port;
   char mqtt_username[33]; // Just set these to 32 as well
@@ -112,11 +110,6 @@ AsyncMqttClient mqttClient;
 //#define MQTT_PASSWORD "" // Defined in secret.h
 //#define MQTT_BASE_TOPIC "" // Defined in secret.h
 
-// ThingSpeak variables
-//#define THINGSPEAK_API_KEY "YourWriteApiKey" // Defined in secret.h
-const char* thingspeak_server = "api.thingspeak.com";
-const char* thingspeak_resource = "/update?api_key=";
-
 // Used for the AP (Access Point) - will be turned on at first boot
 static AsyncWebServer httpServer(80);
 
@@ -135,6 +128,10 @@ Adafruit_BME280 bme280; // Connect to the BME280 via I2C
 
 // BME680 sensor
 Adafruit_BME680 bme680; // Connect to the BME680 via I2C
+
+// Blynk variables
+float blynk_watering_threshold_pct;
+uint8_t blynk_watering_time;
 
 
 static void bubbleSort(uint32_t *array, size_t n) {
@@ -411,8 +408,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->wifi_ssid : WIFI_SSID);
       else if (var == F("WIFI_PASSWORD"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->wifi_password : WIFI_PASSWORD);
-      else if (var == F("THINGSPEAK_API_KEY"))
-        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->thingspeak_api_key : THINGSPEAK_API_KEY);
+      else if (var == F("BLYNK_API_KEY"))
+        return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->blynk_api_key : BLYNK_API_KEY);
       else if (var == F("MQTT_HOST"))
         return String(eeprom_config->magic_number == MAGIC_NUMBER ? eeprom_config->mqtt_host : MQTT_HOST);
       else if (var == F("MQTT_PORT"))
@@ -476,7 +473,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
   // Handle the post request
   httpServer.on("/", HTTP_POST, [&eeprom_config, &p_run_hotspot](AsyncWebServerRequest *request) {
     if (!request->hasArg(F("wifi_ssid")) || !request->hasArg(F("wifi_password"))
-      || !request->hasArg(F("thingspeak_api_key"))
+      || !request->hasArg(F("blynk_api_key"))
       || !request->hasArg(F("mqtt_host")) || !request->hasArg(F("mqtt_port"))
       || !request->hasArg(F("mqtt_username")) || !request->hasArg(F("mqtt_password")) || !request->hasArg(F("mqtt_base_topic"))
       || !request->hasArg(F("sleep_time")) || !request->hasArg(F("watering_delay"))
@@ -492,8 +489,8 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
     strncpy(eeprom_config->wifi_password, request->arg(F("wifi_password")).c_str(), sizeof(eeprom_config->wifi_password) - 1);
     eeprom_config->wifi_password[sizeof(eeprom_config->wifi_password) - 1] = '\0'; // Make sure the buffer is null-terminated
 
-    strncpy(eeprom_config->thingspeak_api_key, request->arg(F("thingspeak_api_key")).c_str(), sizeof(eeprom_config->thingspeak_api_key) - 1);
-    eeprom_config->thingspeak_api_key[sizeof(eeprom_config->thingspeak_api_key) - 1] = '\0'; // Make sure the buffer is null-terminated
+    strncpy(eeprom_config->blynk_api_key, request->arg(F("blynk_api_key")).c_str(), sizeof(eeprom_config->blynk_api_key) - 1);
+    eeprom_config->blynk_api_key[sizeof(eeprom_config->blynk_api_key) - 1] = '\0'; // Make sure the buffer is null-terminated
 
     strncpy(eeprom_config->mqtt_host, request->arg(F("mqtt_host")).c_str(), sizeof(eeprom_config->mqtt_host) - 1);
     eeprom_config->mqtt_host[sizeof(eeprom_config->mqtt_host) - 1] = '\0'; // Make sure the buffer is null-terminated
@@ -588,7 +585,7 @@ static void startAsyncHotspot(bool *p_run_hotspot, eeprom_config_t *eeprom_confi
 }
 
 static void printEEPROMConfig(const eeprom_config_t *eeprom_config) {
-    // The passwords and ThingSpeak API key are not printed for security reasons
+  // The passwords and Blynk API key are not printed for security reasons
   Serial.printf("WiFi SSID: %s\n", eeprom_config->wifi_ssid);
   Serial.printf("MQTT host: %s, port: %u, username: %s, base topic: %s\n",
     eeprom_config->mqtt_host, eeprom_config->mqtt_port,
@@ -597,6 +594,17 @@ static void printEEPROMConfig(const eeprom_config_t *eeprom_config) {
     eeprom_config->sleep_time, eeprom_config->watering_delay,
     eeprom_config->watering_threshold_pct,
     eeprom_config->watering_time, eeprom_config->automatic_ota);
+}
+
+// Use of Blynk.syncAll() or Blynk.syncVirtual(Vx, Vy) will cause the BLYNK_WRITE functions to be called
+BLYNK_WRITE(V2)
+{
+  blynk_watering_threshold_pct = param.asFloat();
+}
+
+BLYNK_WRITE(V3)
+{
+  blynk_watering_time = (uint8_t)param.asInt();
 }
 
 void setup() {
@@ -1136,31 +1144,75 @@ void setup() {
     delay(1000); // TODO: Is this needed?
   }
 
-#ifdef POST_TO_THINGSPEAK
-  if (strlen(eeprom_config.thingspeak_api_key) > 0) {
-    // Post to ThingSpeak
-    if (client.connect(thingspeak_server, 80)) {
-      client.print(String("GET ") + thingspeak_resource + eeprom_config.thingspeak_api_key +
-          "&field1=" + soil_moisture + "&field2=" + voltage + "&field3=" + 0.0 +
-                  " HTTP/1.1\r\n" + "Host: " + thingspeak_server + "\r\n" + "Connection: close\r\n\r\n");
+  if (strlen(eeprom_config.blynk_api_key) > 0) {
+    // Reset variables for Blynk settings
+    blynk_watering_threshold_pct = eeprom_config.watering_threshold_pct;
+    blynk_watering_time = eeprom_config.watering_time;
 
-      int timeout = 5 * 10; // 5 seconds
-      while(!client.available() && (timeout-- > 0))
-        delay(100);
+    // Set up auth token
+    Blynk.config(eeprom_config.blynk_api_key); // Set the Blynk auth token
+    // Connect to blynk server
+    Serial.println(F("Connecting to Blynk server"));
+    if(!Blynk.connect(3333)) // Timeout 10 s (the value is multiplied by 3)
+      Serial.println(F("Failed to connect to Blynk server"));
 
-      while(client.available()){
-        Serial.write(client.read());
-      }
-      Serial.println();
-      Serial.println(F("Successfully posted to Thingspeak!\n"));
-    }else{
-      Serial.println(F("Problem posting data to Thingspeak."));
-      //delay(5000);
-      //ESP.restart();
+    // Read settings
+    Serial.println(F("Reading settings from Blynk"));
+    //TODO: Blynk.syncVirtual(V0, V1, V2, V3, V4);
+    Blynk.syncVirtual(V2, V3);
+
+    // Write sensors
+    Serial.println(F("Writing sensor values to Blynk"));
+    // // Soil moisture raw
+    // Blynk.virtualWrite(V16, soil_moisture);
+    // Soil moisture in pct
+    Blynk.virtualWrite(V17, soil_moisture_pct);
+    // // Battery voltage
+    // Blynk.virtualWrite(V18, voltage / 1000.0);
+    // State of charge
+    Blynk.virtualWrite(V19, state_of_charge);
+    // Temperature
+    if (!isnan(temperature))
+      Blynk.virtualWrite(V20, temperature);
+    // Pressure
+    if (!isnan(pressure))
+      Blynk.virtualWrite(V21, pressure);
+    // Humidity
+    if (!isnan(humidity))
+      Blynk.virtualWrite(V22, humidity);
+    // Gas resistance
+    if (!isnan(gas_resistance) && (gas_resistance != 0.0f))
+      Blynk.virtualWrite(V23, gas_resistance);
+    // Plant has been watered
+    Blynk.virtualWrite(V24, plant_watered);
+
+    // Write Info
+    //Serial.println(F("Writing info to Blynk"));
+    // TODO
+
+    // Set the settings that we read previously
+    bool changed = false;
+
+    // Set the watering threshold
+    if(blynk_watering_threshold_pct != eeprom_config.watering_threshold_pct) {
+      Serial.printf("Setting the watering threshold to %.1f pct from Blynk\n", blynk_watering_threshold_pct);
+      eeprom_config.watering_threshold_pct = blynk_watering_threshold_pct;
+      changed = true;
     }
-    client.stop();
+
+    // Set the watering time
+    if(blynk_watering_time != eeprom_config.watering_time) {
+      Serial.printf("Setting the watering time to %d sec from Blynk\n", blynk_watering_time);
+      eeprom_config.watering_time = blynk_watering_time;
+      changed = true;
+    }
+
+    if(changed){
+      // Replace values in RAM with the modified values
+      // This does NOT make any changes to flash, all data is still in RAM
+      EEPROM.put(0, eeprom_config);
+    }
   }
-#endif
 
   bool ota_reboot = false; // We will handle the OTA reboot manually, as we need to save the EEPROM values first
   if (eeprom_config.automatic_ota && sleep_data.firmware_update_counter >= 24U * 60U / sleep_data.sleep_interval) { // Only check for updates every 24 hrs
