@@ -175,9 +175,8 @@ static long getMean(uint32_t *array, size_t n) {
 static void handleLongSleep(sleep_data_t *sleep_data) {
   if (sizeof(sleep_data_t) % 4 != 0) {
     // TODO: This should never happen when we use the aligned on the sleep_data_t type??
-    Serial.println(F("Sleep data is NOT 4 byte aligned! Rebooting..."));
-    delay(5000);
-    ESP.restart();
+    Serial.println(F("Sleep data is NOT 4 byte aligned! Going to sleep for 15 min..."));
+    ESP.deepSleep(15 * MIN_TO_US, WAKE_RF_DEFAULT);
   }
 
   if (!ESP.rtcUserMemoryRead(SLEEP_DATA_ADDR, (uint32_t*)sleep_data, sizeof(sleep_data_t)))
@@ -213,9 +212,8 @@ static void longSleep(const eeprom_config_t *eeprom_config, sleep_data_t *sleep_
   Serial.print(F("Going into deep sleep for ")); Serial.print(eeprom_config->sleep_time); Serial.println(F(" min"));
   if (sizeof(sleep_data_t) % 4 != 0) {
     // TODO: This should never happen when we use the aligned on the sleep_data_t type??
-    Serial.println(F("Sleep data is NOT 4 byte aligned! Rebooting..."));
-    delay(5000);
-    ESP.restart();
+    Serial.println(F("Sleep data is NOT 4 byte aligned! Going to sleep for 15 min..."));
+    ESP.deepSleep(15 * MIN_TO_US, WAKE_RF_DEFAULT);
   }
 
   sleep_data->magic_number = MAGIC_NUMBER;
@@ -284,9 +282,8 @@ static bool readSoil(uint32_t *soil_measurements, size_t n_meas) {
 uint32_t readSoilMean(uint8_t n_meas) {
   uint32_t soil_measurements[n_meas];
   if (!readSoil(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]))) {
-    Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
-    delay(5000);
-    ESP.restart();
+    Serial.println(F("Timeout reading the soil measurement! Going to sleep for 15 min..."));
+    ESP.deepSleep(15 * MIN_TO_US, WAKE_RF_DEFAULT);
   }
   return getMean(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]));
 }
@@ -294,9 +291,8 @@ uint32_t readSoilMean(uint8_t n_meas) {
 uint32_t readSoilMedian(uint8_t n_meas) {
   uint32_t soil_measurements[n_meas];
   if (!readSoil(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]))) {
-    Serial.println(F("Timeout reading the soil measurement! Rebooting..."));
-    delay(5000);
-    ESP.restart();
+    Serial.println(F("Timeout reading the soil measurement! Going to sleep for 15 min..."));
+    ESP.deepSleep(15 * MIN_TO_US, WAKE_RF_DEFAULT);
   }
   return getMedian(soil_measurements, sizeof(soil_measurements) / sizeof(soil_measurements[0]));
 }
@@ -1331,6 +1327,6 @@ KOqkqm57TH2H3eDJAkSnh6/DNFu0Qg==
 }
 
 void loop() {
-  Serial.println(F("Somewhere we took a wrong turn and ended up in the main loop..."));
-  ESP.restart();
+  Serial.println(F("Somewhere we took a wrong turn and ended up in the main loop... Going to sleep for 15 min..."));
+  ESP.deepSleep(15 * MIN_TO_US, WAKE_RF_DEFAULT);
 }
