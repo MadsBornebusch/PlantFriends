@@ -334,12 +334,11 @@ static float getSOC(float voltage) {
     break;
   default:
     // Check if too high or too low
-    if (voltage >= 4.1) {
+    if (voltage >= 4.1f) {
       return (voltage - 4.1f) * ((100.0f - 94.0f) * 10.0f) + 94.0f;
-    } else if (voltage < 3.4){
+    } else if (voltage < 3.4f){
       return (voltage - 3.3f) * ((6.0f - 0.0f) * 10.0f) + 0.0f;
     }
-    break;
   }
   return 0.0;
 }
