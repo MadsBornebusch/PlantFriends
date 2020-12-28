@@ -223,6 +223,9 @@ TODO: Update this image
 
 # Blynk
 
+At the moment Blynk and OTA updates are not compatible. Turn off OTA updates if you are using Blynk.
+
+
 ## Virtual pins
 
 Settings:
